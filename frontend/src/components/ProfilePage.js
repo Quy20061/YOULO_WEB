@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -11,6 +12,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const avatarRef = useRef();
+  const navigate = useNavigate();
 
   const handleSave = async () => {
     setSaving(true);
@@ -42,6 +44,7 @@ export default function ProfilePage() {
   return (
     <div style={styles.container}>
       {message && <div style={styles.toast}>{message}</div>}
+      <button style={styles.backBtn} onClick={() => navigate(-1)}>← Quay lại</button>
       <div style={styles.card}>
         {/* Cover */}
         <div style={styles.cover}>
@@ -101,6 +104,7 @@ const styles = {
     padding: '12px 20px', borderRadius: 12, zIndex: 9999, fontSize: 14,
     boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
   },
+  backBtn: {marginBottom:12,padding:'10px 16px',border:'none',borderRadius:10,background:'#111827',color:'white',cursor:'pointer'},
   card: { maxWidth: 500, margin: '0 auto', background: 'white', borderRadius: 24, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' },
   cover: { height: 160, position: 'relative', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', overflow: 'hidden' },
   coverGrad: { position: 'absolute', inset: 0, background: 'linear-gradient(45deg, rgba(255,255,255,0.1) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.1) 75%, transparent 75%, transparent)', backgroundSize: '60px 60px' },

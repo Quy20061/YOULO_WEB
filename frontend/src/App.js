@@ -10,7 +10,7 @@ import ProfilePage from './components/ProfilePage';
 const API = process.env.REACT_APP_API_URL || '';
 
 function AppLayout() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
   const [page, setPage] = useState('feed');
 
   if (loading) return (
@@ -67,7 +67,7 @@ function AppLayout() {
               <div style={styles.userName}>{user.name}</div>
               <div style={styles.userSub}>@{user.username}</div>
             </div>
-            <div style={styles.onlineDot} />
+            <button style={styles.logoutMini} onClick={logout}>🚪</button>
           </div>
         </nav>
 
@@ -155,5 +155,6 @@ const styles = {
   userName: { fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   userSub: { fontSize: 11, color: 'rgba(255,255,255,0.3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   onlineDot: { width: 8, height: 8, borderRadius: '50%', background: '#22c55e', flexShrink: 0 },
+  logoutMini:{background:'#ef4444',border:'none',color:'white',borderRadius:8,padding:'6px 8px',cursor:'pointer'} ,
   main: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
 };

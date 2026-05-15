@@ -157,17 +157,6 @@ app.get('/api/friends', authMiddleware, (req, res) => {
   res.json(friends);
 });
 
-
-app.get('/api/friends/requests', authMiddleware, (req, res) => {
-  const requests = db.friendships
-    .filter(f => f.userId2 === req.user.id && f.status === 'pending')
-    .map(f => db.users.find(u => u.id === f.userId1))
-    .filter(Boolean)
-    .map(safeUser);
-
-  res.json(requests);
-});
-
 app.post('/api/friends/request', authMiddleware, (req, res) => {
   const { targetId } = req.body;
   const existing = db.friendships.find(f =>

@@ -10,12 +10,10 @@ export default function FriendsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [tab, setTab] = useState('friends');
-  const [requests, setRequests] = useState([]);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
     loadFriends();
-    loadRequests();
     const unsub = on('friend_request', ({ from }) => {
       setMessage(`🔔 ${from.name} đã gửi lời mời kết bạn!`);
       setTimeout(() => setMessage(''), 4000);
@@ -32,24 +30,6 @@ export default function FriendsPage() {
   const loadFriends = async () => {
     const res = await axios.get('/api/friends');
     setFriends(res.data);
-  };
-
-
-
-  const loadRequests = async () => {
-    try {
-      const res = await axios.get('/api/friends/requests');
-      setRequests(res.data);
-    } catch (e) {
-      console.log(e);
-    }
-  };
-
-  const acceptFriend = async (requesterId) => {
-    await axios.post('/api/friends/accept', { requesterId });
-    loadFriends();
-    loadRequests();
-    setMessage('✅ Đã chấp nhận lời mời');
   };
 
   const sendFriendRequest = async (targetId) => {
@@ -87,9 +67,9 @@ export default function FriendsPage() {
       <div style={styles.header}>
         <h2 style={styles.title}>👥 Bạn bè</h2>
         <div style={styles.tabs}>
-          {['friends', 'requests', 'find'].map(t => (
+          {['friends', 'find'].map(t => (
             <button key={t} style={{ ...styles.tab, ...(tab === t ? styles.tabActive : {}) }} onClick={() => setTab(t)}>
-              {t === 'friends' ? `Bạn bè (${friends.length})` : t === 'requests' ? `Lời mời (${requests.length})` : '🔍 Tìm bạn mới'}
+              {t === 'friends' ? `Bạn bè (${friends.length})` : '🔍 Tìm bạn mới'}
             </button>
           ))}
         </div>
@@ -114,21 +94,6 @@ export default function FriendsPage() {
               <button style={styles.addBtn} onClick={() => sendFriendRequest(u.id)}>
                 ➕ Kết bạn
               </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === 'requests' && (
-        <div style={styles.searchArea}>
-          {requests.map(r => (
-            <div key={r.id} style={styles.userCard}>
-              <AvatarComp u={r} />
-              <div style={styles.userInfo}>
-                <div style={styles.userName}>{r.name}</div>
-                <div style={styles.userSub}>@{r.username}</div>
-              </div>
-              <button style={styles.addBtn} onClick={() => acceptFriend(r.id)}>✅ Đồng ý</button>
             </div>
           ))}
         </div>

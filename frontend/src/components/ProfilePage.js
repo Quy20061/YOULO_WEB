@@ -1,5 +1,4 @@
 import React, { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -7,12 +6,19 @@ const API = process.env.REACT_APP_API_URL || '';
 
 export default function ProfilePage() {
   const { user, logout, updateUser } = useAuth();
+
+  if (!user) {
+    return (
+      <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#0f172a', color: 'white', minHeight: '100vh' }}>
+        Đang tải hồ sơ...
+      </div>
+    );
+  }
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: user?.name || '', bio: user?.bio || '', phone: user?.phone || '' });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const avatarRef = useRef();
-  const navigate = useNavigate();
 
   const handleSave = async () => {
     setSaving(true);
@@ -44,7 +50,6 @@ export default function ProfilePage() {
   return (
     <div style={styles.container}>
       {message && <div style={styles.toast}>{message}</div>}
-      <button style={styles.backBtn} onClick={() => navigate(-1)}>← Quay lại</button>
       <div style={styles.card}>
         {/* Cover */}
         <div style={styles.cover}>
@@ -84,7 +89,7 @@ export default function ProfilePage() {
               <p style={styles.username}>@{user?.username}</p>
               {user?.bio && <p style={styles.bio}>{user?.bio}</p>}
               {user?.phone && <p style={styles.detail}>📱 {user?.phone}</p>}
-              <p style={styles.detail}>📅 Tham gia {new Date(user?.createdAt).toLocaleDateString('vi-VN')}</p>
+              <p style={styles.detail}>📅 Tham gia {user?.createdAt ? new Date(user.createdAt).toLocaleDateString('vi-VN') : 'Chưa cập nhật'}</p>
               <div style={styles.actions}>
                 <button style={styles.editBtn} onClick={() => setEditing(true)}>✏️ Chỉnh sửa</button>
                 <button style={styles.logoutBtn} onClick={logout}>🚪 Đăng xuất</button>
@@ -104,7 +109,6 @@ const styles = {
     padding: '12px 20px', borderRadius: 12, zIndex: 9999, fontSize: 14,
     boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
   },
-  backBtn: {marginBottom:12,padding:'10px 16px',border:'none',borderRadius:10,background:'#111827',color:'white',cursor:'pointer'},
   card: { maxWidth: 500, margin: '0 auto', background: 'white', borderRadius: 24, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' },
   cover: { height: 160, position: 'relative', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', overflow: 'hidden' },
   coverGrad: { position: 'absolute', inset: 0, background: 'linear-gradient(45deg, rgba(255,255,255,0.1) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.1) 75%, transparent 75%, transparent)', backgroundSize: '60px 60px' },

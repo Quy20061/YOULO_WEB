@@ -23,6 +23,10 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+app.get('/', (req, res) => {
+  res.send('Server YouLo đang chạy cực mượt!');
+});
+
 if (!fs.existsSync('./uploads')) fs.mkdirSync('./uploads');
 if (!fs.existsSync('./uploads/avatars')) fs.mkdirSync('./uploads/avatars');
 if (!fs.existsSync('./uploads/media')) fs.mkdirSync('./uploads/media');
@@ -374,5 +378,7 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+const PORT = process.env.PORT || 8080; 
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});

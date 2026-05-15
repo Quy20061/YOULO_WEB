@@ -23,9 +23,8 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.get('/', (req, res) => {
-  res.send('Server YouLo đang chạy cực mượt!');
-});
+// Serve React frontend (production build)
+app.use(express.static(path.join(__dirname, 'frontend', 'build')));
 
 if (!fs.existsSync('./uploads')) fs.mkdirSync('./uploads');
 if (!fs.existsSync('./uploads/avatars')) fs.mkdirSync('./uploads/avatars');
@@ -378,7 +377,10 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 8080; 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+// Catch-all: trả về React app cho mọi route không phải /api
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'frontend', 'build', 'index.html'));
 });
+
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));

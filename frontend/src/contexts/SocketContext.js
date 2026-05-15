@@ -13,7 +13,8 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     if (!token) return;
-    const socket = io('http://localhost:5000', { transports: ['websocket'] });
+    const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || window.location.origin;
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
     socket.on('connect', () => {

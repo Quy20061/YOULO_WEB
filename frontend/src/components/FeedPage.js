@@ -5,7 +5,7 @@ import { useSocket } from '../contexts/SocketContext';
 import { formatDistanceToNow } from 'date-fns';
 import { vi } from 'date-fns/locale';
 
-const API = 'http://localhost:5000';
+const API = process.env.REACT_APP_API_URL || '';
 
 export default function FeedPage() {
   const { user } = useAuth();

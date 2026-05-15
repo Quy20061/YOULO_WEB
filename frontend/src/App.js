@@ -7,7 +7,7 @@ import FeedPage from './components/FeedPage';
 import FriendsPage from './components/FriendsPage';
 import ProfilePage from './components/ProfilePage';
 
-const API = 'https://youlo-web-production.up.railway.app';
+const API = process.env.REACT_APP_API_URL || '';
 
 function AppLayout() {
   const { user, loading } = useAuth();

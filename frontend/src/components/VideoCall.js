@@ -223,7 +223,7 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     if (track) { track.enabled = !track.enabled; setIsVideoOff(!isVideoOff); }
   };
 
-  const avatar = targetUser.avatar ? `http://localhost:5000${targetUser.avatar}` : null;
+  const baseUrl = process.env.REACT_APP_API_URL || ""; const avatar = targetUser.avatar ? `${baseUrl}${targetUser.avatar}` : null;
 
   const statusLabel = {
     calling: '📡 Đang gọi...',

@@ -112,7 +112,7 @@ function BadgeBridge({ unreadMsg, pendingFriends }) {
 }
 
 function AppLayout() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
   const [page, setPage] = useState('feed');
   const [badges, setBadges] = useState({ unreadMsg: 0, pendingFriends: 0 });
 
@@ -182,7 +182,15 @@ function AppLayout() {
               <div style={styles.userName}>{user.name}</div>
               <div style={styles.userSub}>@{user.username}</div>
             </div>
-            <div style={styles.onlineDot} />
+            <button
+              title="Đăng xuất"
+              onClick={logout}
+              style={styles.logoutBtn}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.25)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+            >
+              🚪
+            </button>
           </div>
         </nav>
 
@@ -276,7 +284,12 @@ const styles = {
   userInfo: { flex: 1, minWidth: 0 },
   userName: { fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   userSub: { fontSize: 11, color: 'rgba(255,255,255,0.3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  onlineDot: { width: 8, height: 8, borderRadius: '50%', background: '#22c55e', flexShrink: 0 },
+  logoutBtn: {
+    width: 32, height: 32, borderRadius: 8, border: 'none', cursor: 'pointer',
+    background: 'rgba(239,68,68,0.1)', color: 'white', fontSize: 15,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, transition: 'background 0.2s',
+  },
   main: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
 
   // ── Incoming call banner ──────────────────────────────────────────

@@ -8,6 +8,31 @@ import { vi } from 'date-fns/locale';
 
 const API = process.env.REACT_APP_API_URL || '';
 
+// ── Emoji picker data (10 nhóm phổ biến) ─────────────────────────────────────
+const EMOJI_GROUPS = [
+  { label: '😀', emojis: ['😀','😂','🥰','😍','🤩','😎','🥳','😭','😤','🤔','😴','🤗','😏','🙃','😬','🥺','😱','🤯','😇','🤑','😈','💀','👻','🤖','😺','😸','😹','😻','😼','😾'] },
+  { label: '👍', emojis: ['👍','👎','👏','🙌','🤝','🤜','🤛','✊','👊','🖐','✌️','🤟','🤘','👌','🤌','🤏','💪','🦾','🖖','🤙','💅','🫶','❤️','🧡','💛','💚','💙','💜','🖤','🤍'] },
+  { label: '🔥', emojis: ['🔥','💥','✨','⭐','🌟','💫','🎉','🎊','🎈','🎁','🏆','🥇','🎯','🎮','🕹️','🎲','🧩','🎭','🎬','🎤','🎧','🎼','🎹','🥁','🎷','🎸','🎺','🪗','🎻','🪕'] },
+  { label: '🐶', emojis: ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🐔','🐧','🐦','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝'] },
+  { label: '🍎', emojis: ['🍎','🍊','🍋','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🫒','🥑','🍆','🥦','🥕','🌽','🌶️','🥒','🧄','🧅','🥔','🍠','🫘','🥜','🌰','🍞'] },
+  { label: '🚗', emojis: ['🚗','🚕','🚙','🚌','🚎','🏎️','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🏍️','🛵','🚲','🛴','🛹','🚁','✈️','🚀','🛸','⛵','🚤','🛥️','🚢','🚂','🚇','🚉'] },
+  { label: '⚽', emojis: ['⚽','🏀','🏈','⚾','🎾','🏐','🏉','🎱','🏓','🏸','🥊','🥋','🎿','⛷️','🏂','🏋️','🤼','🤸','🤺','🏇','⛹️','🤾','🏌️','🏄','🚣','🧗','🚵','🚴','🏊','🤽'] },
+  { label: '🌍', emojis: ['🌍','🌎','🌏','🌐','🗺️','🧭','🏔️','⛰️','🌋','🗻','🏕️','🏖️','🏜️','🏝️','🏟️','🏛️','🏗️','🧱','🏠','🏡','🏢','🏣','🏤','🏥','🏦','🏨','🏩','🏪','🏫','🏬'] },
+  { label: '💎', emojis: ['💎','💍','👑','🏅','🎖️','🥇','🥈','🥉','🏆','🎀','🎗️','🎫','🎟️','🎪','🤹','🎠','🎡','🎢','🛍️','🎑','🎆','🎇','🧨','✨','🎉','🎊','🎋','🎍','🎎','🎏'] },
+  { label: '❤️', emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','☯️','🙏','💏','💑','👨‍👩‍👧','👨‍👩‍👦','👪'] },
+];
+
+// ── Sticker data (emoji lớn dùng làm sticker) ────────────────────────────────
+const STICKERS = [
+  ['🥰','😭','😤','🤯','🥳','😴','🤗','😱','🙈','💀'],
+  ['🔥','💯','✨','👑','💎','🎉','🤌','💅','🫶','⚡'],
+  ['🐶','🐱','🐼','🦊','🐸','🦄','🐝','🦋','🌸','🌈'],
+  ['👍','🤝','💪','🫡','🤟','✌️','🙌','👏','🤜','🫶'],
+];
+
+// ── GIF categories (dùng Giphy trending — sử dụng public beta key) ───────────
+const GIPHY_KEY = 'dc6zaTOxFJmzC'; // public beta key Giphy
+
 export default function ChatPage() {
   const { user } = useAuth();
   const { onlineUsers, incomingCall, clearIncomingCall, on, emit } = useSocket();
@@ -22,6 +47,23 @@ export default function ChatPage() {
   const [showCallModal, setShowCallModal] = useState(false);
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // ── Toolbar state ─────────────────────────────────────────────────
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [emojiGroup, setEmojiGroup] = useState(0);
+  const [showSticker, setShowSticker] = useState(false);
+  const [showGif, setShowGif] = useState(false);
+  const [gifs, setGifs] = useState([]);
+  const [gifSearch, setGifSearch] = useState('');
+  const [gifLoading, setGifLoading] = useState(false);
+
+  // ── Voice recording state ─────────────────────────────────────────
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordTimerRef = useRef(null);
 
   useEffect(() => { loadConversations(); }, []);
 
@@ -58,6 +100,11 @@ export default function ChatPage() {
     }
   }, [searchQuery]);
 
+  // Load GIF trending khi mở panel lần đầu
+  useEffect(() => {
+    if (showGif && gifs.length === 0) fetchGifs('');
+  }, [showGif]);
+
   const loadConversations = async () => {
     const res = await axios.get('/api/conversations');
     setConversations(res.data);
@@ -68,11 +115,15 @@ export default function ChatPage() {
     setMessages(res.data);
   };
 
-  const sendMessage = () => {
-    if (!input.trim() || !selectedUser) return;
-    emit('send_message', { receiverId: selectedUser.id, text: input.trim(), type: 'text' });
+  const sendMessage = (text, type = 'text') => {
+    const content = text || input.trim();
+    if (!content || !selectedUser) return;
+    emit('send_message', { receiverId: selectedUser.id, text: content, type });
     setInput('');
     emit('typing', { receiverId: selectedUser.id, isTyping: false });
+    setShowEmoji(false);
+    setShowSticker(false);
+    setShowGif(false);
   };
 
   const handleInputChange = (e) => {
@@ -111,6 +162,83 @@ export default function ChatPage() {
     }
   };
 
+  // ── Gửi ảnh ──────────────────────────────────────────────────────
+  const handleImageSend = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !selectedUser) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      // Gửi dưới dạng data URL (base64) — server lưu hoặc relay qua socket
+      emit('send_message', { receiverId: selectedUser.id, text: reader.result, type: 'image' });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // ── Emoji ─────────────────────────────────────────────────────────
+  const insertEmoji = (emoji) => {
+    setInput(prev => prev + emoji);
+  };
+
+  // ── Sticker ───────────────────────────────────────────────────────
+  const sendSticker = (emoji) => {
+    sendMessage(emoji, 'sticker');
+  };
+
+  // ── GIF ───────────────────────────────────────────────────────────
+  const fetchGifs = async (q) => {
+    setGifLoading(true);
+    try {
+      const endpoint = q
+        ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(q)}&limit=12&rating=g`
+        : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=12&rating=g`;
+      const res = await fetch(endpoint);
+      const json = await res.json();
+      setGifs(json.data || []);
+    } catch {
+      setGifs([]);
+    }
+    setGifLoading(false);
+  };
+
+  const sendGif = (gif) => {
+    const url = gif.images?.fixed_height?.url || gif.images?.original?.url;
+    if (url) sendMessage(url, 'gif');
+    setShowGif(false);
+  };
+
+  // ── Voice recording ───────────────────────────────────────────────
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      mediaRecorderRef.current = mr;
+      audioChunksRef.current = [];
+      mr.ondataavailable = e => audioChunksRef.current.push(e.data);
+      mr.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        sendMessage(url, 'audio');
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mr.start();
+      setRecording(true);
+      setRecordSeconds(0);
+      recordTimerRef.current = setInterval(() => setRecordSeconds(s => s + 1), 1000);
+    } catch {
+      alert('Không thể truy cập micro. Vui lòng kiểm tra quyền trình duyệt.');
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    clearInterval(recordTimerRef.current);
+    setRecording(false);
+    setRecordSeconds(0);
+  };
+
+  const fmtSec = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
   const getAvatar = (u) => u?.avatar ? `${API}${u.avatar}` : null;
 
   const Avatar = ({ u, size = 44, showOnline = false }) => (
@@ -119,8 +247,7 @@ export default function ChatPage() {
         width: size, height: size, borderRadius: '50%',
         background: 'linear-gradient(135deg, #a855f7, #ec4899)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        overflow: 'hidden', fontSize: size * 0.4, color: 'white', fontWeight: 700,
-        flexShrink: 0,
+        overflow: 'hidden', fontSize: size * 0.4, color: 'white', fontWeight: 700, flexShrink: 0,
       }}>
         {getAvatar(u)
           ? <img src={getAvatar(u)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -137,6 +264,38 @@ export default function ChatPage() {
       )}
     </div>
   );
+
+  // ── Render tin nhắn theo type ─────────────────────────────────────
+  const renderMsgContent = (msg) => {
+    if (msg.type === 'image') {
+      return (
+        <img
+          src={msg.text}
+          alt="ảnh"
+          style={{ maxWidth: 220, maxHeight: 220, borderRadius: 12, display: 'block', cursor: 'pointer' }}
+          onClick={() => window.open(msg.text, '_blank')}
+        />
+      );
+    }
+    if (msg.type === 'gif') {
+      return (
+        <img
+          src={msg.text}
+          alt="gif"
+          style={{ maxWidth: 220, borderRadius: 12, display: 'block' }}
+        />
+      );
+    }
+    if (msg.type === 'sticker') {
+      return <span style={{ fontSize: 52, lineHeight: 1 }}>{msg.text}</span>;
+    }
+    if (msg.type === 'audio') {
+      return <audio src={msg.text} controls style={{ maxWidth: 220, height: 36 }} />;
+    }
+    return msg.text;
+  };
+
+  const closeAllPanels = () => { setShowEmoji(false); setShowSticker(false); setShowGif(false); };
 
   return (
     <div style={styles.container}>
@@ -198,7 +357,12 @@ export default function ChatPage() {
                     color: unreadCount ? '#c084fc' : 'rgba(255,255,255,0.35)',
                   }}>
                     {lastMessage
-                      ? (lastMessage.senderId === user.id ? '✓ ' : '') + lastMessage.text
+                      ? (lastMessage.senderId === user.id ? '✓ ' : '') +
+                        (lastMessage.type === 'image' ? '📷 Hình ảnh'
+                          : lastMessage.type === 'gif' ? '🎞️ GIF'
+                          : lastMessage.type === 'sticker' ? lastMessage.text
+                          : lastMessage.type === 'audio' ? '🎤 Tin nhắn thoại'
+                          : lastMessage.text)
                       : 'Bắt đầu trò chuyện 👋'}
                   </span>
                   {unreadCount > 0 && <span style={styles.badge}>{unreadCount}</span>}
@@ -210,11 +374,11 @@ export default function ChatPage() {
       </div>
 
       {/* ── Chat Area ────────────────────────── */}
-      <div style={styles.chatArea}>
+      <div style={styles.chatArea} onClick={closeAllPanels}>
         {selectedUser ? (
           <>
             {/* Header */}
-            <div style={styles.chatHeader}>
+            <div style={styles.chatHeader} onClick={e => e.stopPropagation()}>
               <Avatar u={selectedUser} showOnline />
               <div style={{ flex: 1, marginLeft: 12 }}>
                 <div style={styles.chatName}>{selectedUser.name}</div>
@@ -225,12 +389,8 @@ export default function ChatPage() {
                 </div>
               </div>
               <div style={styles.callButtons}>
-                <button style={styles.callBtn} onClick={() => startCall('audio')} title="Gọi thoại">
-                  📞
-                </button>
-                <button style={styles.callBtn} onClick={() => startCall('video')} title="Gọi video">
-                  📹
-                </button>
+                <button style={styles.callBtn} onClick={() => startCall('audio')} title="Gọi thoại">📞</button>
+                <button style={styles.callBtn} onClick={() => startCall('video')} title="Gọi video">📹</button>
               </div>
             </div>
 
@@ -245,9 +405,12 @@ export default function ChatPage() {
                   <div style={{ maxWidth: '68%' }}>
                     <div style={{
                       ...styles.bubble,
-                      ...(msg.senderId === user.id ? styles.bubbleMine : styles.bubbleTheirs),
+                      // Sticker/gif/audio không có background
+                      ...(msg.type === 'sticker' || msg.type === 'gif' || msg.type === 'audio'
+                        ? { background: 'none', border: 'none', padding: 4, boxShadow: 'none' }
+                        : msg.senderId === user.id ? styles.bubbleMine : styles.bubbleTheirs),
                     }}>
-                      {msg.text}
+                      {renderMsgContent(msg)}
                     </div>
                     <div style={{ ...styles.msgTime, textAlign: msg.senderId === user.id ? 'right' : 'left' }}>
                       {formatDistanceToNow(new Date(msg.createdAt), { locale: vi, addSuffix: true })}
@@ -261,27 +424,141 @@ export default function ChatPage() {
                 <div style={styles.msgRow}>
                   <Avatar u={selectedUser} size={30} />
                   <div style={{ ...styles.bubble, ...styles.bubbleTheirs, marginLeft: 8 }}>
-                    <span style={styles.typingDots}>
-                      <span>●</span><span>●</span><span>●</span>
-                    </span>
+                    <span style={styles.typingDots}><span>●</span><span>●</span><span>●</span></span>
                   </div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
-            <div style={styles.inputArea}>
-              <input
-                style={styles.messageInput}
-                placeholder="Nhắn gì đó... 💬"
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-              />
-              <button style={styles.sendBtn} onClick={sendMessage}>
-                <span style={{ fontSize: 20 }}>➤</span>
-              </button>
+            {/* ── Toolbar + Input ─────────────────────────────────────── */}
+            <div style={styles.inputWrapper} onClick={e => e.stopPropagation()}>
+
+              {/* ── Emoji Panel ── */}
+              {showEmoji && (
+                <div style={styles.popupPanel}>
+                  {/* Group tabs */}
+                  <div style={styles.emojiTabs}>
+                    {EMOJI_GROUPS.map((g, i) => (
+                      <button key={i} style={{ ...styles.emojiTab, ...(emojiGroup === i ? styles.emojiTabActive : {}) }}
+                        onClick={() => setEmojiGroup(i)}>
+                        {g.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={styles.emojiGrid}>
+                    {EMOJI_GROUPS[emojiGroup].emojis.map(e => (
+                      <button key={e} style={styles.emojiBtn} onClick={() => insertEmoji(e)}>{e}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Sticker Panel ── */}
+              {showSticker && (
+                <div style={styles.popupPanel}>
+                  <div style={styles.panelTitle}>Sticker</div>
+                  {STICKERS.map((row, i) => (
+                    <div key={i} style={styles.stickerRow}>
+                      {row.map(s => (
+                        <button key={s} style={styles.stickerBtn} onClick={() => sendSticker(s)}>{s}</button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── GIF Panel ── */}
+              {showGif && (
+                <div style={styles.popupPanel}>
+                  <div style={styles.panelTitle}>GIF</div>
+                  <input
+                    style={styles.gifSearch}
+                    placeholder="🔍 Tìm GIF..."
+                    value={gifSearch}
+                    onChange={e => setGifSearch(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && fetchGifs(gifSearch)}
+                  />
+                  {gifLoading
+                    ? <div style={{ textAlign: 'center', padding: 20, color: 'rgba(255,255,255,0.4)' }}>Đang tải...</div>
+                    : (
+                      <div style={styles.gifGrid}>
+                        {gifs.map(gif => (
+                          <img
+                            key={gif.id}
+                            src={gif.images?.fixed_height_small?.url}
+                            alt={gif.title}
+                            style={styles.gifItem}
+                            onClick={() => sendGif(gif)}
+                          />
+                        ))}
+                        {gifs.length === 0 && <div style={{ color: 'rgba(255,255,255,0.3)', padding: 12, fontSize: 13 }}>Không tìm thấy GIF</div>}
+                      </div>
+                    )
+                  }
+                </div>
+              )}
+
+              {/* ── Toolbar row ── */}
+              <div style={styles.toolbar}>
+                {/* Micro */}
+                <button
+                  style={{ ...styles.toolBtn, ...(recording ? styles.toolBtnActive : {}) }}
+                  title={recording ? 'Dừng ghi âm' : 'Ghi âm'}
+                  onClick={recording ? stopRecording : startRecording}
+                >
+                  🎙️
+                </button>
+                {recording && <span style={styles.recTimer}>{fmtSec(recordSeconds)}</span>}
+
+                {/* Ảnh */}
+                <button style={styles.toolBtn} title="Gửi ảnh" onClick={() => fileInputRef.current?.click()}>📷</button>
+                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageSend} />
+
+                {/* Sticker */}
+                <button
+                  style={{ ...styles.toolBtn, ...(showSticker ? styles.toolBtnActive : {}) }}
+                  title="Sticker"
+                  onClick={() => { setShowSticker(p => !p); setShowEmoji(false); setShowGif(false); }}
+                >
+                  🤩
+                </button>
+
+                {/* GIF */}
+                <button
+                  style={{ ...styles.toolBtnGif, ...(showGif ? styles.toolBtnActive : {}) }}
+                  title="GIF"
+                  onClick={() => { setShowGif(p => !p); setShowEmoji(false); setShowSticker(false); }}
+                >
+                  GIF
+                </button>
+
+                {/* Text input */}
+                <input
+                  style={styles.messageInput}
+                  placeholder="Aa"
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                />
+
+                {/* Emoji */}
+                <button
+                  style={{ ...styles.toolBtn, ...(showEmoji ? styles.toolBtnActive : {}) }}
+                  title="Emoji"
+                  onClick={() => { setShowEmoji(p => !p); setShowSticker(false); setShowGif(false); }}
+                >
+                  😊
+                </button>
+
+                {/* Send */}
+                <button style={styles.sendBtn} onClick={() => sendMessage()} title="Gửi">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M22 2L11 13" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           </>
         ) : (
@@ -299,24 +576,16 @@ export default function ChatPage() {
           <div style={styles.callNotifPulse} />
           <div style={styles.callNotifInfo}>
             <div style={styles.callNotifIconWrap}>
-              <span style={{ fontSize: 24, animation: 'ring 0.5s ease-in-out infinite' }}>
-                {incomingCall.callType === 'video' ? '📹' : '📞'}
-              </span>
+              <span style={{ fontSize: 24 }}>{incomingCall.callType === 'video' ? '📹' : '📞'}</span>
             </div>
             <div>
               <div style={styles.callNotifName}>{incomingCall.callerName}</div>
-              <div style={styles.callNotifType}>
-                {incomingCall.callType === 'video' ? 'Gọi video đến' : 'Cuộc gọi đến'}
-              </div>
+              <div style={styles.callNotifType}>{incomingCall.callType === 'video' ? 'Gọi video đến' : 'Cuộc gọi đến'}</div>
             </div>
           </div>
           <div style={styles.callNotifBtns}>
-            <button style={{ ...styles.callNotifBtn, background: 'linear-gradient(135deg,#22c55e,#16a34a)', boxShadow: '0 0 16px rgba(34,197,94,0.4)' }} onClick={handleIncomingCall}>
-              📞
-            </button>
-            <button style={{ ...styles.callNotifBtn, background: 'linear-gradient(135deg,#ef4444,#dc2626)', boxShadow: '0 0 16px rgba(239,68,68,0.4)' }} onClick={handleRejectIncomingCall}>
-              📵
-            </button>
+            <button style={{ ...styles.callNotifBtn, background: 'linear-gradient(135deg,#22c55e,#16a34a)', boxShadow: '0 0 16px rgba(34,197,94,0.4)' }} onClick={handleIncomingCall}>📞</button>
+            <button style={{ ...styles.callNotifBtn, background: 'linear-gradient(135deg,#ef4444,#dc2626)', boxShadow: '0 0 16px rgba(239,68,68,0.4)' }} onClick={handleRejectIncomingCall}>📵</button>
           </div>
         </div>
       )}
@@ -372,7 +641,7 @@ const styles = {
     cursor: 'pointer', borderRadius: 14, margin: '2px 8px',
     transition: 'background 0.15s',
   },
-  convItemActive: { background: 'rgba(168,85,247,0.12)', },
+  convItemActive: { background: 'rgba(168,85,247,0.12)' },
   convInfo: { flex: 1, minWidth: 0 },
   convRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   convName: { fontWeight: 600, fontSize: 14, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -394,9 +663,8 @@ const styles = {
   chatStatus: { fontSize: 12, marginTop: 2 },
   callButtons: { display: 'flex', gap: 8 },
   callBtn: {
-    width: 40, height: 40, borderRadius: '50%', border: 'none',
+    width: 40, height: 40, borderRadius: '50%', border: '1px solid rgba(168,85,247,0.2)',
     background: 'rgba(168,85,247,0.15)',
-    border: '1px solid rgba(168,85,247,0.2)',
     cursor: 'pointer', fontSize: 18,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     transition: 'background 0.15s',
@@ -422,24 +690,98 @@ const styles = {
   msgTime: { fontSize: 10, color: 'rgba(255,255,255,0.25)', marginTop: 3, paddingLeft: 4 },
   typingDots: { color: '#a855f7', letterSpacing: 3, fontSize: 18 },
 
-  // ── Input
-  inputArea: {
-    display: 'flex', gap: 10, padding: '14px 20px',
-    background: '#13131f', borderTop: '1px solid rgba(255,255,255,0.06)',
-    alignItems: 'center',
+  // ── Input wrapper (toolbar + panels)
+  inputWrapper: {
+    background: '#13131f',
+    borderTop: '1px solid rgba(255,255,255,0.06)',
+    position: 'relative',
+  },
+
+  // ── Toolbar
+  toolbar: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '10px 14px',
+  },
+  toolBtn: {
+    width: 36, height: 36, borderRadius: 10, border: 'none',
+    background: 'rgba(255,255,255,0.06)', cursor: 'pointer',
+    fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, transition: 'background 0.15s',
+  },
+  toolBtnGif: {
+    height: 36, padding: '0 10px', borderRadius: 10, border: 'none',
+    background: 'rgba(255,255,255,0.06)', cursor: 'pointer',
+    fontSize: 13, fontWeight: 800, color: 'white',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, transition: 'background 0.15s', letterSpacing: 0.5,
+  },
+  toolBtnActive: {
+    background: 'rgba(168,85,247,0.25)',
+    outline: '1.5px solid rgba(168,85,247,0.5)',
+  },
+  recTimer: {
+    fontSize: 12, color: '#ef4444', fontWeight: 700, flexShrink: 0, minWidth: 36,
   },
   messageInput: {
-    flex: 1, padding: '12px 18px', borderRadius: 24,
-    border: '1px solid rgba(255,255,255,0.1)', fontSize: 14, outline: 'none',
+    flex: 1, padding: '10px 16px', borderRadius: 20,
+    border: '1px solid rgba(255,255,255,0.08)', fontSize: 14, outline: 'none',
     background: 'rgba(255,255,255,0.05)', color: 'white',
   },
   sendBtn: {
-    width: 46, height: 46, borderRadius: '50%', border: 'none',
+    width: 38, height: 38, borderRadius: '50%', border: 'none',
     background: 'linear-gradient(135deg, #a855f7, #ec4899)',
     color: 'white', cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    boxShadow: '0 4px 12px rgba(168,85,247,0.4)',
-    flexShrink: 0,
+    boxShadow: '0 4px 12px rgba(168,85,247,0.4)', flexShrink: 0,
+  },
+
+  // ── Popup panels (emoji / sticker / gif)
+  popupPanel: {
+    position: 'absolute', bottom: '100%', left: 0, right: 0,
+    background: '#1a1a2e', borderTop: '1px solid rgba(255,255,255,0.08)',
+    maxHeight: 280, overflowY: 'auto', padding: '10px 12px',
+    boxShadow: '0 -8px 32px rgba(0,0,0,0.4)',
+    zIndex: 100,
+  },
+  panelTitle: {
+    fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 1, marginBottom: 10,
+  },
+
+  // Emoji
+  emojiTabs: { display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' },
+  emojiTab: {
+    padding: '4px 8px', borderRadius: 8, border: 'none',
+    background: 'rgba(255,255,255,0.05)', cursor: 'pointer', fontSize: 16,
+  },
+  emojiTabActive: { background: 'rgba(168,85,247,0.3)', outline: '1px solid rgba(168,85,247,0.5)' },
+  emojiGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 2,
+  },
+  emojiBtn: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    fontSize: 22, padding: 4, borderRadius: 6,
+    transition: 'background 0.1s',
+  },
+
+  // Sticker
+  stickerRow: { display: 'flex', gap: 6, marginBottom: 6 },
+  stickerBtn: {
+    background: 'rgba(255,255,255,0.05)', border: 'none', cursor: 'pointer',
+    fontSize: 36, padding: '6px 8px', borderRadius: 10,
+    transition: 'background 0.1s',
+  },
+
+  // GIF
+  gifSearch: {
+    width: '100%', padding: '8px 12px', borderRadius: 10, marginBottom: 8,
+    border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.06)',
+    color: 'white', fontSize: 13, outline: 'none', boxSizing: 'border-box',
+  },
+  gifGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 },
+  gifItem: {
+    width: '100%', borderRadius: 8, cursor: 'pointer',
+    objectFit: 'cover', aspectRatio: '4/3', transition: 'opacity 0.15s',
   },
 
   // ── Empty state
@@ -451,23 +793,18 @@ const styles = {
   emptyTitle: { fontSize: 22, fontWeight: 800, color: 'white', margin: 0, letterSpacing: '-0.5px' },
   emptyText: { color: 'rgba(255,255,255,0.35)', fontSize: 14, textAlign: 'center', maxWidth: 280, lineHeight: 1.6 },
 
-  // ── Incoming call notification
+  // ── Incoming call
   incomingCallNotif: {
     position: 'fixed', bottom: 28, right: 28,
-    background: '#1a0a2e',
-    border: '1px solid rgba(168,85,247,0.3)',
+    background: '#1a0a2e', border: '1px solid rgba(168,85,247,0.3)',
     borderRadius: 20, padding: '16px 20px',
     display: 'flex', gap: 14, alignItems: 'center',
-    zIndex: 1000,
-    boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 30px rgba(168,85,247,0.2)',
-    animation: 'slideIn 0.3s ease',
-    minWidth: 300,
+    zIndex: 1000, boxShadow: '0 20px 60px rgba(0,0,0,0.5)', minWidth: 300,
   },
   callNotifPulse: {
     position: 'absolute', inset: 0, borderRadius: 20,
     border: '2px solid rgba(168,85,247,0.4)',
-    animation: 'glow 1.5s ease-in-out infinite',
-    pointerEvents: 'none',
+    animation: 'glow 1.5s ease-in-out infinite', pointerEvents: 'none',
   },
   callNotifInfo: { display: 'flex', gap: 12, alignItems: 'center', flex: 1 },
   callNotifIconWrap: {

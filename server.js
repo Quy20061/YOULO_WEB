@@ -172,6 +172,14 @@ app.post('/api/friends/request', authMiddleware, (req, res) => {
   res.json({ message: 'Đã gửi yêu cầu kết bạn' });
 });
 
+// Lấy danh sách lời mời kết bạn đang chờ (người khác gửi đến mình)
+app.get('/api/friends/pending', authMiddleware, (req, res) => {
+  const myId = req.user.id;
+  const pending = db.friendships.filter(f => f.userId2 === myId && f.status === 'pending');
+  const requesters = pending.map(f => safeUser(db.users.find(u => u.id === f.userId1))).filter(Boolean);
+  res.json(requesters);
+});
+
 app.post('/api/friends/accept', authMiddleware, (req, res) => {
   const { requesterId } = req.body;
   const friendship = db.friendships.find(f => f.userId1 === requesterId && f.userId2 === req.user.id && f.status === 'pending');

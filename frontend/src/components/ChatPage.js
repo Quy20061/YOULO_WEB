@@ -363,9 +363,15 @@ export default function ChatPage() {
             <div style={styles.inputArea}>
               <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
               <div style={styles.toolbarIcons}>
-                <button style={styles.toolBtn} title="Gửi ảnh" onClick={() => fileInputRef.current && fileInputRef.current.click()}>🖼️</button>
-                <button style={styles.toolBtn} title="Sticker">🎭</button>
-                <button style={{ ...styles.toolBtn, fontSize: 11, fontWeight: 800, letterSpacing: 1, color: '#a78bfa' }} title="GIF">GIF</button>
+                <button style={styles.toolBtn} title="Gửi ảnh" onClick={() => fileInputRef.current && fileInputRef.current.click()}>
+                  <span style={{ fontSize: 18, lineHeight: 1 }}>🖼️</span>
+                </button>
+                <button style={styles.toolBtn} title="Sticker">
+                  <span style={{ fontSize: 18, lineHeight: 1 }}>🎭</span>
+                </button>
+                <button style={{ ...styles.toolBtn, minWidth: 44 }} title="GIF">
+                  <span style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.5, color: '#a78bfa', fontFamily: 'monospace' }}>GIF</span>
+                </button>
               </div>
               <input
                 style={styles.messageInput}
@@ -374,7 +380,9 @@ export default function ChatPage() {
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
               />
-              <button style={styles.emojiToggleBtn} title="Emoji" onClick={() => setShowEmojiPicker(p => !p)}>😊</button>
+              <button style={styles.emojiToggleBtn} title="Emoji" onClick={() => setShowEmojiPicker(p => !p)}>
+                <span style={{ fontSize: 22, lineHeight: 1 }}>😊</span>
+              </button>
               <button style={{ ...styles.sendBtn, opacity: !input.trim() ? 0.5 : 1 }} onClick={sendMessage}>
                 <span style={{ fontSize: 20 }}>➤</span>
               </button>
@@ -614,9 +622,9 @@ const styles = {
   emptyTitle: { fontSize: 22, fontWeight: 800, color: 'white', margin: 0, letterSpacing: '-0.5px' },
   emptyText: { color: 'rgba(255,255,255,0.35)', fontSize: 14, textAlign: 'center', maxWidth: 280, lineHeight: 1.6 },
   createGroupBtnEmpty: { padding: '12px 28px', borderRadius: 14, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg, #6366f1, #a855f7)', color: 'white', fontWeight: 700, fontSize: 15, boxShadow: '0 4px 16px rgba(99,102,241,0.35)' },
-  toolbarIcons: { display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 },
-  toolBtn: { width: 36, height: 36, borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' },
-  emojiToggleBtn: { width: 36, height: 36, borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  toolbarIcons: { display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 },
+  toolBtn: { width: 40, height: 40, borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.05)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', flexShrink: 0, padding: 0 },
+  emojiToggleBtn: { width: 40, height: 40, borderRadius: 12, border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, padding: 0 },
   emojiPicker: { display: 'flex', flexWrap: 'wrap', gap: 2, padding: '10px 16px', background: '#1a1a2e', borderTop: '1px solid rgba(255,255,255,0.08)', maxHeight: 140, overflowY: 'auto' },
   emojiBtn: { width: 36, height: 36, borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' },
   imagePreviewBar: { display: 'flex', alignItems: 'center', padding: '10px 16px', background: '#1a1a2e', borderTop: '1px solid rgba(255,255,255,0.08)', gap: 8 },

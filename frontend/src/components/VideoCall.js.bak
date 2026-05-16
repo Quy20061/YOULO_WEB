@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 
-// TURN server giúp xuyên NAT
+// TURN server giúp xuyên NAT - dùng free public TURN
 const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
+    // Free TURN servers để xuyên qua symmetric NAT
     {
       urls: 'turn:openrelay.metered.ca:80',
       username: 'openrelayproject',
@@ -35,21 +36,21 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
   const remoteVideoRef = useRef(null);
   const peerRef        = useRef(null);
   const localStreamRef = useRef(null);
-  const pendingIceRef  = useRef([]);
-  const remoteSetRef   = useRef(false);
+  const pendingIceRef  = useRef([]);       // ICE candidates đến trước khi remote SDP sẵn
+  const remoteSetRef   = useRef(false);    // đã setRemoteDescription chưa
+  const calledRef      = useRef(false);    // tránh buildPeer() chạy 2 lần
 
-  // Incoming: bắt đầu ở 'incoming', caller bắt đầu ở 'calling'
-  const [callStatus, setCallStatus]   = useState(isIncoming ? 'incoming' : 'calling');
-  const [isMuted,    setIsMuted]      = useState(false);
-  const [isVideoOff, setIsVideoOff]   = useState(false);
-  const [callDuration, setCallDuration] = useState(0);
+  const [callStatus,  setCallStatus]  = useState(isIncoming ? 'incoming' : 'calling');
+  const [isMuted,     setIsMuted]     = useState(false);
+  const [isVideoOff,  setIsVideoOff]  = useState(false);
+  const [callDuration,setCallDuration]= useState(0);
   const durationTimerRef = useRef(null);
 
   /* ── helpers ─────────────────────────────────────────────────────── */
-  const startTimer = useCallback(() => {
+  const startTimer = () => {
     if (durationTimerRef.current) return;
     durationTimerRef.current = setInterval(() => setCallDuration(d => d + 1), 1000);
-  }, []);
+  };
 
   const fmtTime = (s) =>
     `${String(Math.floor(s / 60)).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
@@ -57,15 +58,13 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
   const stopAll = useCallback(() => {
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     if (peerRef.current) {
-      peerRef.current.ontrack               = null;
-      peerRef.current.onicecandidate        = null;
+      peerRef.current.ontrack        = null;
+      peerRef.current.onicecandidate = null;
       peerRef.current.onconnectionstatechange = null;
       peerRef.current.close();
       peerRef.current = null;
     }
     clearInterval(durationTimerRef.current);
-    durationTimerRef.current = null;
-    document.getElementById('__remoteAudio__')?.remove();
   }, []);
 
   const hangUp = useCallback(() => {
@@ -74,7 +73,7 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     onEnd();
   }, [emit, stopAll, onEnd, targetUser]);
 
-  /* ── flush ICE queue ─────────────────────────────────────────────── */
+  /* ── flush ICE queue sau khi remoteDescription sẵn ──────────────── */
   const flushIce = async (pc) => {
     for (const c of pendingIceRef.current) {
       try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
@@ -82,14 +81,15 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     pendingIceRef.current = [];
   };
 
-  /* ── gán remote stream ───────────────────────────────────────────── */
-  const attachRemoteStream = useCallback((stream) => {
+  /* ── gán remote stream lên <video> / <audio> ─────────────────────── */
+  const attachRemoteStream = (stream) => {
     if (callType === 'video' && remoteVideoRef.current) {
       if (remoteVideoRef.current.srcObject !== stream) {
         remoteVideoRef.current.srcObject = stream;
       }
       remoteVideoRef.current.play().catch(() => {});
     } else {
+      // Gọi thoại: tạo element <audio> tự động phát
       const existing = document.getElementById('__remoteAudio__');
       const audio = existing || document.createElement('audio');
       audio.id       = '__remoteAudio__';
@@ -99,13 +99,14 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
       audio.srcObject = stream;
       audio.play().catch(() => {});
     }
-  }, [callType]);
+  };
 
-  /* ── tạo PeerConnection + lấy local media ────────────────────────── */
+  /* ── tạo PeerConnection + lấy local media ─────────────────────────── */
   const buildPeer = useCallback(async () => {
-    // Nếu đã có peer thì không tạo lại
-    if (peerRef.current) return peerRef.current;
+    if (calledRef.current) return null;
+    calledRef.current = true;
 
+    /* 1. Lấy local stream */
     const constraints = {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       video: callType === 'video'
@@ -118,6 +119,7 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
       stream = await navigator.mediaDevices.getUserMedia(constraints);
     } catch {
       try {
+        // fallback: chỉ âm thanh
         stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       } catch (e2) {
         console.error('Media access denied:', e2);
@@ -128,28 +130,36 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
 
     localStreamRef.current = stream;
 
+    /* 2. Hiện local video preview */
     if (localVideoRef.current && callType === 'video') {
       localVideoRef.current.srcObject = stream;
       localVideoRef.current.play().catch(() => {});
     }
 
+    /* 3. Tạo RTCPeerConnection */
     const pc = new RTCPeerConnection(ICE_SERVERS);
     peerRef.current = pc;
 
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    /* 4. Add local tracks */
+    stream.getTracks().forEach(track => {
+      pc.addTrack(track, stream);
+    });
 
+    /* 5. Nhận remote tracks */
     pc.ontrack = (event) => {
-      console.log('🎥 ontrack', event.track.kind);
+      console.log('🎥 ontrack fired', event.track.kind, event.streams);
       const remoteStream = event.streams[0] || new MediaStream([event.track]);
       attachRemoteStream(remoteStream);
     };
 
+    /* 6. Gửi ICE candidates */
     pc.onicecandidate = (e) => {
       if (e.candidate) {
         emit('ice_candidate', { targetId: targetUser.id, candidate: e.candidate });
       }
     };
 
+    /* 7. Theo dõi kết nối */
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       console.log('📡 connectionState:', state);
@@ -157,6 +167,7 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
         setCallStatus('connected');
         startTimer();
       } else if (state === 'failed') {
+        console.warn('Connection failed — trying ICE restart');
         pc.restartIce();
       } else if (state === 'disconnected') {
         setCallStatus('ended');
@@ -169,13 +180,13 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     };
 
     return pc;
-  }, [callType, emit, targetUser, attachRemoteStream, startTimer, stopAll, onEnd]);
+  }, [callType, emit, targetUser, stopAll, onEnd]);
 
   /* ── useEffect chính ─────────────────────────────────────────────── */
   useEffect(() => {
     let unsubAnswered, unsubRejected, unsubEnded, unsubIce;
 
-    // ICE candidate handler — luôn đăng ký ngay
+    /* ICE candidate handler — luôn đăng ký ngay */
     unsubIce = on('ice_candidate', async ({ candidate }) => {
       const pc = peerRef.current;
       if (!pc || !remoteSetRef.current) {
@@ -186,15 +197,12 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     });
 
     if (!isIncoming) {
-      /* ══ CALLER: tạo offer và gửi đi ══════════════════════════════ */
+      /* ══ CALLER ════════════════════════════════════════════════════ */
       (async () => {
         const pc = await buildPeer();
         if (!pc) return;
 
-        const offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: callType === 'video',
-        });
+        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: callType === 'video' });
         await pc.setLocalDescription(offer);
 
         emit('call_user', {
@@ -202,16 +210,14 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
           signal:      offer,
           callType,
           callerName:  user.name,
-          callerAvatar: user.avatar,
+          callerAvatar:user.avatar,
         });
       })();
 
-      // Nhận answer từ receiver
       unsubAnswered = on('call_answered', async ({ signal }) => {
         const pc = peerRef.current;
         if (!pc) return;
         try {
-          if (pc.signalingState !== 'have-local-offer') return; // tránh setRemote 2 lần
           await pc.setRemoteDescription(new RTCSessionDescription(signal));
           remoteSetRef.current = true;
           await flushIce(pc);
@@ -219,7 +225,7 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
           setCallStatus('connected');
           startTimer();
 
-          // Kiểm tra receivers đã có track chưa
+          /* Sau khi setRemoteDescription, kiểm tra receiver đã có track chưa */
           const receivers = pc.getReceivers();
           if (receivers.length > 0) {
             const remoteStream = new MediaStream(
@@ -231,8 +237,24 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
       });
 
     } else {
-      /* ══ RECEIVER: chờ user bấm "Nghe máy" rồi mới answer ════════ */
-      // Không buildPeer ở đây — sẽ gọi khi user bấm nút
+      /* ══ RECEIVER ══════════════════════════════════════════════════ */
+      (async () => {
+        const pc = await buildPeer();
+        if (!pc) return;
+
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(callerSignal));
+          remoteSetRef.current = true;
+          await flushIce(pc);
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          emit('answer_call', { targetId: targetUser.id, signal: answer });
+          setCallStatus('connected');
+          startTimer();
+        } catch (e) { console.error('setRemoteDescription (offer) failed:', e); }
+      })();
     }
 
     unsubRejected = on('call_rejected', () => {
@@ -251,33 +273,10 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
       unsubEnded?.();
       unsubIce?.();
       stopAll();
+      // Dọn audio element tạm
+      document.getElementById('__remoteAudio__')?.remove();
     };
   }, []); // eslint-disable-line
-
-  /* ── Nghe máy (receiver bấm nút) ─────────────────────────────────── */
-  const acceptCall = useCallback(async () => {
-    setCallStatus('connecting');
-
-    const pc = await buildPeer();
-    if (!pc) return;
-
-    try {
-      await pc.setRemoteDescription(new RTCSessionDescription(callerSignal));
-      remoteSetRef.current = true;
-      await flushIce(pc);
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      emit('answer_call', { targetId: targetUser.id, signal: answer });
-      setCallStatus('connected');
-      startTimer();
-    } catch (e) {
-      console.error('acceptCall failed:', e);
-      setCallStatus('ended');
-      setTimeout(() => { stopAll(); onEnd(); }, 1500);
-    }
-  }, [buildPeer, callerSignal, emit, targetUser, startTimer, stopAll, onEnd]);
 
   /* ── controls ────────────────────────────────────────────────────── */
   const rejectCall = () => {
@@ -300,48 +299,38 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
   const avatar = targetUser.avatar ? `${API}${targetUser.avatar}` : null;
 
   const statusLabel = {
-    calling:    'Đang gọi...',
-    incoming:   `${callType === 'video' ? 'Gọi video đến' : 'Cuộc gọi đến'}`,
-    connecting: 'Đang kết nối...',
-    connected:  fmtTime(callDuration),
-    rejected:   'Cuộc gọi bị từ chối',
-    ended:      'Cuộc gọi kết thúc',
+    calling:    '📡 Đang gọi...',
+    incoming:   '📲 Cuộc gọi đến',
+    connecting: '🔄 Đang kết nối...',
+    connected:  `${callType === 'video' ? '📹' : '🎙️'} ${fmtTime(callDuration)}`,
+    rejected:   '❌ Cuộc gọi bị từ chối',
+    ended:      '📵 Cuộc gọi kết thúc',
   }[callStatus] || '';
-
-  const isConnected = callStatus === 'connected';
-  const showVideo = callType === 'video';
 
   /* ── JSX ─────────────────────────────────────────────────────────── */
   return (
     <div style={S.overlay}>
       <div style={S.container}>
 
-        {/* Remote video full screen */}
-        {showVideo && (
+        {/* ── Remote video (full screen) ── */}
+        {callType === 'video' && (
           <video
             ref={remoteVideoRef}
             autoPlay playsInline
             style={{
               ...S.remoteVideo,
-              opacity: isConnected ? 1 : 0,
+              // Ẩn khi chưa có stream (hiện avatar thay)
+              opacity: callStatus === 'connected' ? 1 : 0,
             }}
           />
         )}
 
-        {/* Avatar / status panel (hiện khi chưa connect hoặc audio call) */}
+        {/* ── Avatar / status panel ── */}
         <div style={{
           ...S.bgPanel,
-          opacity: (showVideo && isConnected) ? 0 : 1,
-          pointerEvents: (showVideo && isConnected) ? 'none' : 'auto',
+          opacity: (callType === 'video' && callStatus === 'connected') ? 0 : 1,
+          pointerEvents: (callType === 'video' && callStatus === 'connected') ? 'none' : 'auto',
         }}>
-          {/* Animated rings */}
-          {(callStatus === 'calling' || callStatus === 'incoming') && (
-            <>
-              <div style={{ ...S.ring, ...S.ring1 }} />
-              <div style={{ ...S.ring, ...S.ring2 }} />
-            </>
-          )}
-
           <div style={S.avatarRing}>
             <div style={S.avatarCircle}>
               {avatar
@@ -350,12 +339,10 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
               }
             </div>
           </div>
-
           <h2 style={S.callerName}>{targetUser.name}</h2>
-          <p style={S.statusText}>{statusLabel}</p>
+          <p  style={S.statusText}>{statusLabel}</p>
 
-          {/* Audio bars khi đang nghe */}
-          {isConnected && callType === 'audio' && (
+          {callStatus === 'connected' && callType === 'audio' && (
             <div style={S.audioBars}>
               {[...Array(5)].map((_,i) => (
                 <div key={i} style={{ ...S.bar, animationDelay:`${i*0.15}s` }} />
@@ -364,20 +351,20 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
           )}
         </div>
 
-        {/* Local video PiP */}
-        {showVideo && (
+        {/* ── Local video preview (picture-in-picture) ── */}
+        {callType === 'video' && (
           <video
             ref={localVideoRef}
             autoPlay playsInline muted
             style={{
               ...S.localVideo,
-              display: (callStatus === 'calling' || isConnected) ? 'block' : 'none',
+              display: callStatus === 'connected' ? 'block' : 'none',
             }}
           />
         )}
 
-        {/* Top bar: tên + thời gian (khi video connected) */}
-        {showVideo && isConnected && (
+        {/* ── Top bar khi video connected ── */}
+        {callType === 'video' && callStatus === 'connected' && (
           <div style={S.topBar}>
             <span style={S.topName}>{targetUser.name}</span>
             <span style={S.topDuration}>{fmtTime(callDuration)}</span>
@@ -387,21 +374,25 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
         {/* ── Controls ── */}
         <div style={S.controls}>
           {callStatus === 'incoming' ? (
-            /* Nhận/Từ chối cuộc gọi */
-            <div style={S.incomingControls}>
+            /* Đầu nhận: hiện nút nghe / từ chối */
+            <>
+              <CtrlBtn icon="📞" label="Nghe máy" style={S.acceptBtn}
+                onClick={() => {
+                  // buildPeer đã chạy trong useEffect — chỉ cập nhật UI
+                  setCallStatus('connecting');
+                }}
+              />
               <CtrlBtn icon="📵" label="Từ chối" style={S.rejectBtn} onClick={rejectCall} />
-              <CtrlBtn icon="📞" label="Nghe máy" style={S.acceptBtn} onClick={acceptCall} />
-            </div>
+            </>
           ) : (
-            /* Đang gọi / Connected controls */
-            <div style={S.activeControls}>
+            <>
               <CtrlBtn
                 icon={isMuted ? '🔇' : '🎙️'}
                 label={isMuted ? 'Bật mic' : 'Tắt mic'}
                 style={isMuted ? S.activeBtn : S.controlBtn}
                 onClick={toggleMute}
               />
-              {showVideo && (
+              {callType === 'video' && (
                 <CtrlBtn
                   icon={isVideoOff ? '🚫' : '📷'}
                   label={isVideoOff ? 'Bật cam' : 'Tắt cam'}
@@ -410,23 +401,11 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
                 />
               )}
               <CtrlBtn icon="📵" label="Kết thúc" style={S.rejectBtn} onClick={hangUp} />
-            </div>
+            </>
           )}
         </div>
 
       </div>
-
-      {/* CSS animation */}
-      <style>{`
-        @keyframes vcPulse {
-          0% { transform: scaleY(0.4); }
-          100% { transform: scaleY(1); }
-        }
-        @keyframes ringPulse {
-          0% { transform: scale(1); opacity: 0.6; }
-          100% { transform: scale(1.8); opacity: 0; }
-        }
-      `}</style>
     </div>
   );
 }
@@ -446,139 +425,102 @@ function CtrlBtn({ icon, label, style, onClick }) {
 /* ── Styles ──────────────────────────────────────────────────────── */
 const S = {
   overlay: {
-    position: 'fixed', inset: 0, zIndex: 9999,
-    background: 'rgba(0,0,0,0.96)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    position:'fixed', inset:0, zIndex:9999,
+    background:'rgba(0,0,0,0.96)',
+    display:'flex', alignItems:'center', justifyContent:'center',
   },
   container: {
-    width: '100%', maxWidth: 400, height: '100vh', maxHeight: 760,
-    background: 'linear-gradient(160deg,#1a0a2e 0%,#0f0f1a 100%)',
-    borderRadius: 36, overflow: 'hidden', position: 'relative',
-    display: 'flex', flexDirection: 'column', alignItems: 'center',
-    border: '1px solid rgba(168,85,247,0.2)',
-    boxShadow: '0 0 60px rgba(168,85,247,0.2)',
+    width:'100%', maxWidth:480, height:'100vh', maxHeight:740,
+    background:'linear-gradient(160deg,#1a0a2e 0%,#0f0f1a 100%)',
+    borderRadius:28, overflow:'hidden', position:'relative',
+    display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'space-between',
+    border:'1px solid rgba(168,85,247,0.2)',
+    boxShadow:'0 0 60px rgba(168,85,247,0.15)',
   },
 
   /* remote full-screen */
   remoteVideo: {
-    position: 'absolute', inset: 0,
-    width: '100%', height: '100%',
-    objectFit: 'cover', borderRadius: 36,
-    zIndex: 1,
-    transition: 'opacity 0.4s',
-    backgroundColor: '#000',
+    position:'absolute', inset:0,
+    width:'100%', height:'100%',
+    objectFit:'cover', borderRadius:28,
+    zIndex:1,
+    transition:'opacity 0.4s',
+    backgroundColor:'#000',
   },
 
-  /* background / avatar panel */
+  /* background / avatar */
   bgPanel: {
-    flex: 1, display: 'flex', flexDirection: 'column',
-    alignItems: 'center', justifyContent: 'center',
-    padding: '60px 40px 140px', gap: 14,
-    zIndex: 2, transition: 'opacity 0.5s',
-    position: 'relative', width: '100%',
+    flex:1, display:'flex', flexDirection:'column',
+    alignItems:'center', justifyContent:'center',
+    padding:'40px 40px 20px', gap:16,
+    zIndex:2, transition:'opacity 0.5s',
   },
-
-  /* Animated rings */
-  ring: {
-    position: 'absolute',
-    width: 160, height: 160,
-    borderRadius: '50%',
-    border: '2px solid rgba(168,85,247,0.4)',
-    animation: 'ringPulse 2s ease-out infinite',
-  },
-  ring1: { animationDelay: '0s' },
-  ring2: { animationDelay: '0.7s' },
-
   avatarRing: {
-    padding: 5, borderRadius: '50%',
-    background: 'linear-gradient(135deg,#a855f7,#ec4899)',
-    boxShadow: '0 0 50px rgba(168,85,247,0.6)',
-    zIndex: 1,
+    padding:6, borderRadius:'50%',
+    background:'linear-gradient(135deg,#a855f7,#ec4899)',
+    boxShadow:'0 0 40px rgba(168,85,247,0.5)',
   },
   avatarCircle: {
-    width: 116, height: 116, borderRadius: '50%',
-    background: 'linear-gradient(135deg,#a855f7,#ec4899)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    overflow: 'hidden',
+    width:120, height:120, borderRadius:'50%',
+    background:'linear-gradient(135deg,#a855f7,#ec4899)',
+    display:'flex', alignItems:'center', justifyContent:'center',
+    overflow:'hidden',
   },
-  avatarInitial: { fontSize: 48, color: 'white', fontWeight: 800 },
-  callerName: {
-    color: 'white', fontSize: 28, fontWeight: 800, margin: 0,
-    letterSpacing: '-0.5px', textAlign: 'center',
-  },
-  statusText: {
-    color: 'rgba(255,255,255,0.55)', fontSize: 15, margin: 0, textAlign: 'center',
-  },
-  audioBars: { display: 'flex', gap: 5, alignItems: 'flex-end', height: 36, marginTop: 8 },
+  avatarInitial: { fontSize:48, color:'white', fontWeight:800 },
+  callerName:    { color:'white', fontSize:26, fontWeight:800, margin:0, letterSpacing:'-0.5px' },
+  statusText:    { color:'rgba(255,255,255,0.6)', fontSize:15, margin:0 },
+  audioBars:     { display:'flex', gap:4, alignItems:'flex-end', height:32 },
   bar: {
-    width: 5, height: 22, borderRadius: 3,
-    background: 'linear-gradient(180deg,#a855f7,#ec4899)',
-    animation: 'vcPulse 0.8s ease-in-out infinite alternate',
+    width:5, height:20, borderRadius:3,
+    background:'linear-gradient(180deg,#a855f7,#ec4899)',
+    animation:'vcPulse 0.8s ease-in-out infinite alternate',
   },
 
   /* local PiP */
   localVideo: {
-    position: 'absolute', bottom: 120, right: 18,
-    width: 96, height: 136, objectFit: 'cover',
-    borderRadius: 16, border: '2.5px solid rgba(168,85,247,0.6)',
-    zIndex: 10, transform: 'scaleX(-1)',
-    boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-    backgroundColor: '#111',
+    position:'absolute', bottom:110, right:16,
+    width:100, height:140, objectFit:'cover',
+    borderRadius:14, border:'2px solid rgba(168,85,247,0.5)',
+    zIndex:10, transform:'scaleX(-1)',
+    boxShadow:'0 8px 20px rgba(0,0,0,0.4)',
+    backgroundColor:'#111',
   },
 
-  /* top bar khi video */
+  /* top bar */
   topBar: {
-    position: 'absolute', top: 24, left: 24, right: 24,
-    display: 'flex', justifyContent: 'space-between',
-    zIndex: 5, alignItems: 'center',
+    position:'absolute', top:20, left:20, right:20,
+    display:'flex', justifyContent:'space-between', zIndex:5,
   },
-  topName: {
-    color: 'white', fontWeight: 700, fontSize: 16,
-    textShadow: '0 2px 8px rgba(0,0,0,0.7)',
-  },
-  topDuration: {
-    color: '#c084fc', fontWeight: 700, fontSize: 15,
-    textShadow: '0 2px 8px rgba(0,0,0,0.7)',
-  },
+  topName:     { color:'white', fontWeight:700, fontSize:15, textShadow:'0 2px 8px rgba(0,0,0,0.6)' },
+  topDuration: { color:'#c084fc', fontWeight:700, textShadow:'0 2px 8px rgba(0,0,0,0.6)' },
 
   /* controls */
   controls: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    paddingBottom: 44, zIndex: 10,
-    background: 'linear-gradient(0deg, rgba(0,0,0,0.7) 0%, transparent 100%)',
+    position:'absolute', bottom:36, left:0, right:0,
+    display:'flex', justifyContent:'center', gap:28, zIndex:10, alignItems:'flex-end',
   },
-  incomingControls: {
-    display: 'flex', justifyContent: 'space-around',
-    alignItems: 'flex-end', padding: '0 40px',
-  },
-  activeControls: {
-    display: 'flex', justifyContent: 'center',
-    gap: 28, padding: '0 20px', alignItems: 'flex-end',
-  },
-
-  ctrlGroup: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 },
+  ctrlGroup: { display:'flex', flexDirection:'column', alignItems:'center', gap:6 },
   btn: {
-    width: 68, height: 68, borderRadius: '50%', border: 'none',
-    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    transition: 'transform 0.15s, box-shadow 0.15s',
+    width:66, height:66, borderRadius:'50%', border:'none',
+    cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+    transition:'transform 0.15s, box-shadow 0.15s',
   },
-  btnLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 500 },
-
+  btnLabel: { color:'rgba(255,255,255,0.5)', fontSize:11, fontWeight:500 },
   acceptBtn: {
-    background: 'linear-gradient(135deg,#22c55e,#16a34a)',
-    boxShadow: '0 0 28px rgba(34,197,94,0.55)',
+    background:'linear-gradient(135deg,#22c55e,#16a34a)',
+    boxShadow:'0 0 24px rgba(34,197,94,0.5)',
   },
   rejectBtn: {
-    background: 'linear-gradient(135deg,#ef4444,#dc2626)',
-    boxShadow: '0 0 28px rgba(239,68,68,0.55)',
+    background:'linear-gradient(135deg,#ef4444,#dc2626)',
+    boxShadow:'0 0 24px rgba(239,68,68,0.5)',
   },
   controlBtn: {
-    background: 'rgba(255,255,255,0.15)',
-    backdropFilter: 'blur(16px)',
-    border: '1px solid rgba(255,255,255,0.18)',
+    background:'rgba(255,255,255,0.1)',
+    backdropFilter:'blur(12px)',
+    border:'1px solid rgba(255,255,255,0.15)',
   },
   activeBtn: {
-    background: 'rgba(239,68,68,0.35)',
-    border: '1px solid rgba(239,68,68,0.5)',
+    background:'rgba(239,68,68,0.35)',
+    border:'1px solid rgba(239,68,68,0.4)',
   },
 };

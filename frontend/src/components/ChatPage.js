@@ -194,9 +194,37 @@ export default function ChatPage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
+  // ── State cho group video call
+  const [showGroupVideoCall, setShowGroupVideoCall] = useState(false);
+  const [groupCallMembers, setGroupCallMembers] = useState([]);
+
   const startCall = (callType) => {
     setActiveCall({ targetUser: selectedUser, callType, isIncoming: false, callerSignal: null });
     setShowCallModal(true);
+  };
+
+  // Gọi video cho nhóm: gửi call_user tới từng thành viên online
+  const startGroupCall = () => {
+    if (!selectedGroup) return;
+    const onlineMembers = (selectedGroup.members || []).filter(m => m.id !== user.id && onlineUsers[m.id]);
+    if (onlineMembers.length === 0) {
+      alert('Không có thành viên nào đang online trong nhóm.');
+      return;
+    }
+    setGroupCallMembers(onlineMembers);
+    setShowGroupVideoCall(true);
+    // Gửi thông báo cuộc gọi tới tất cả thành viên online
+    onlineMembers.forEach(m => {
+      emit('call_user', {
+        targetId: m.id,
+        signal: null, // signal sẽ được trao đổi qua VideoCall component
+        callType: 'video',
+        callerName: user.name,
+        callerAvatar: user.avatar,
+        isGroupCall: true,
+        groupName: selectedGroup.name,
+      });
+    });
   };
 
   const handleIncomingCall = () => {
@@ -510,7 +538,10 @@ export default function ChatPage() {
                   <button style={styles.callBtn} onClick={() => startCall('video')} title="Gọi video">📹</button>
                 </>}
                 {selectedGroup && (
-                  <button style={{ ...styles.callBtn, fontSize: 14 }} onClick={leaveGroup} title="Rời nhóm">🚪</button>
+                  <>
+                    <button style={styles.callBtn} onClick={startGroupCall} title="Gọi video nhóm">📹</button>
+                    <button style={{ ...styles.callBtn, fontSize: 14 }} onClick={leaveGroup} title="Rời nhóm">🚪</button>
+                  </>
                 )}
               </div>
             </div>
@@ -682,6 +713,9 @@ export default function ChatPage() {
                 {creatingGroup ? 'Đang tạo...' : '✓ Tạo nhóm'}
               </button>
             </div>
+            <div style={{ padding: '0 24px 16px', fontSize: 12, color: 'rgba(255,255,255,0.25)', textAlign: 'center' }}>
+              📹 Nhóm hỗ trợ gọi video với các thành viên đang online
+            </div>
           </div>
         </div>
       )}
@@ -714,6 +748,45 @@ export default function ChatPage() {
           callerSignal={activeCall.callerSignal}
           onEnd={() => { setShowCallModal(false); setActiveCall(null); clearIncomingCall(); }}
         />
+      )}
+
+      {/* ── Group Video Call Modal ──────────── */}
+      {showGroupVideoCall && groupCallMembers.length > 0 && (
+        <div style={styles.modalOverlay}>
+          <div style={{ ...styles.modalBox, maxWidth: 380, textAlign: 'center' }}>
+            <div style={styles.modalHeader}>
+              <span style={styles.modalTitle}>📹 Gọi video nhóm</span>
+              <button style={styles.modalClose} onClick={() => setShowGroupVideoCall(false)}>✕</button>
+            </div>
+            <div style={styles.modalBody}>
+              <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 16 }}>
+                Đang gọi {groupCallMembers.length} thành viên online trong <strong style={{ color: '#c084fc' }}>{selectedGroup?.name}</strong>
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
+                {groupCallMembers.map(m => (
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.04)' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg,#a855f7,#ec4899)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, flexShrink: 0 }}>
+                      {m.name?.[0]}
+                    </div>
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <div style={{ color: 'white', fontWeight: 600, fontSize: 14 }}>{m.name}</div>
+                      <div style={{ color: '#22c55e', fontSize: 11 }}>● Đang online</div>
+                    </div>
+                    <span style={{ fontSize: 18 }}>📡</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={styles.modalFooter}>
+              <button style={{ ...styles.cancelBtn, flex: 1 }} onClick={() => {
+                groupCallMembers.forEach(m => emit('end_call', { targetId: m.id }));
+                setShowGroupVideoCall(false);
+              }}>
+                📵 Kết thúc
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

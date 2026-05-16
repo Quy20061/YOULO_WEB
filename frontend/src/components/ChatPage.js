@@ -217,8 +217,12 @@ export default function ChatPage() {
       mr.ondataavailable = e => audioChunksRef.current.push(e.data);
       mr.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const url = URL.createObjectURL(blob);
-        sendMessage(url, 'audio');
+        // FIX: blob URL chỉ sống trên máy gửi — chuyển sang base64 để truyền qua socket
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          sendMessage(reader.result, 'audio'); // "data:audio/webm;base64,..."
+        };
+        reader.readAsDataURL(blob);
         stream.getTracks().forEach(t => t.stop());
       };
       mr.start();

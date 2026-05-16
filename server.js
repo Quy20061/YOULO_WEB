@@ -38,7 +38,9 @@ const db = {
   messages: [],
   posts: [],
   friendships: [],
-  notifications: []
+  notifications: [],
+  groups: [],        // { id, name, avatar, ownerId, members: [userId], createdAt }
+  groupMessages: []  // { id, groupId, senderId, text, type, createdAt }
 };
 
 // Seed demo users
@@ -279,6 +281,81 @@ app.post('/api/posts/:id/comment', authMiddleware, (req, res) => {
   res.json(enriched);
 });
 
+// === GROUP ROUTES ===
+
+// Tạo nhóm mới
+app.post('/api/groups', authMiddleware, (req, res) => {
+  const { name, memberIds } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Tên nhóm không được để trống' });
+  const members = [...new Set([req.user.id, ...(memberIds || [])])];
+  if (members.length < 2) return res.status(400).json({ error: 'Nhóm cần ít nhất 2 thành viên' });
+  const group = {
+    id: uuidv4(),
+    name: name.trim(),
+    avatar: null,
+    ownerId: req.user.id,
+    members,
+    createdAt: new Date().toISOString()
+  };
+  db.groups.push(group);
+  members.forEach(memberId => {
+    const memberUser = db.users.find(u => u.id === memberId);
+    if (memberUser?.socketId && memberId !== req.user.id) {
+      io.to(memberUser.socketId).emit('group_added', group);
+    }
+  });
+  res.json(group);
+});
+
+// Lấy danh sách nhóm
+app.get('/api/groups', authMiddleware, (req, res) => {
+  const myGroups = db.groups.filter(g => g.members.includes(req.user.id));
+  const enriched = myGroups.map(g => {
+    const msgs = db.groupMessages.filter(m => m.groupId === g.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return {
+      ...g,
+      members: g.members.map(id => safeUser(db.users.find(u => u.id === id))).filter(Boolean),
+      lastMessage: msgs[0] || null
+    };
+  });
+  res.json(enriched);
+});
+
+// Lấy tin nhắn nhóm
+app.get('/api/groups/:id/messages', authMiddleware, (req, res) => {
+  const group = db.groups.find(g => g.id === req.params.id);
+  if (!group) return res.status(404).json({ error: 'Nhóm không tồn tại' });
+  if (!group.members.includes(req.user.id)) return res.status(403).json({ error: 'Bạn không phải thành viên' });
+  const messages = db.groupMessages
+    .filter(m => m.groupId === req.params.id)
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    .map(m => ({ ...m, sender: safeUser(db.users.find(u => u.id === m.senderId)) }));
+  res.json(messages);
+});
+
+// Thêm thành viên
+app.post('/api/groups/:id/members', authMiddleware, (req, res) => {
+  const group = db.groups.find(g => g.id === req.params.id);
+  if (!group) return res.status(404).json({ error: 'Nhóm không tồn tại' });
+  if (group.ownerId !== req.user.id) return res.status(403).json({ error: 'Chỉ trưởng nhóm mới có thể thêm thành viên' });
+  const { userId } = req.body;
+  if (group.members.includes(userId)) return res.status(400).json({ error: 'Đã là thành viên' });
+  group.members.push(userId);
+  const newMember = db.users.find(u => u.id === userId);
+  if (newMember?.socketId) io.to(newMember.socketId).emit('group_added', group);
+  res.json(group);
+});
+
+// Rời nhóm
+app.delete('/api/groups/:id/leave', authMiddleware, (req, res) => {
+  const group = db.groups.find(g => g.id === req.params.id);
+  if (!group) return res.status(404).json({ error: 'Nhóm không tồn tại' });
+  group.members = group.members.filter(id => id !== req.user.id);
+  if (group.ownerId === req.user.id && group.members.length > 0) group.ownerId = group.members[0];
+  res.json({ message: 'Đã rời nhóm' });
+});
+
+
 // === SOCKET.IO ===
 const userSockets = new Map(); // userId -> socketId
 
@@ -372,6 +449,49 @@ io.on('connection', (socket) => {
     if (target?.socketId) {
       io.to(target.socketId).emit('ice_candidate', { candidate, from: socket.userId });
     }
+  });
+
+
+  // === GROUP SOCKET EVENTS ===
+  socket.on('send_group_message', (data) => {
+    const { groupId, text, type } = data;
+    const group = db.groups.find(g => g.id === groupId);
+    if (!group || !group.members.includes(socket.userId)) return;
+    const message = {
+      id: uuidv4(),
+      groupId,
+      senderId: socket.userId,
+      text,
+      type: type || 'text',
+      createdAt: new Date().toISOString()
+    };
+    db.groupMessages.push(message);
+    const enriched = { ...message, sender: safeUser(db.users.find(u => u.id === socket.userId)) };
+    // Gửi cho tất cả thành viên nhóm
+    group.members.forEach(memberId => {
+      const member = db.users.find(u => u.id === memberId);
+      if (member?.socketId && memberId !== socket.userId) {
+        io.to(member.socketId).emit('new_group_message', enriched);
+      }
+    });
+    socket.emit('group_message_sent', enriched);
+  });
+
+  socket.on('group_typing', ({ groupId, isTyping }) => {
+    const group = db.groups.find(g => g.id === groupId);
+    if (!group) return;
+    const sender = db.users.find(u => u.id === socket.userId);
+    group.members.forEach(memberId => {
+      const member = db.users.find(u => u.id === memberId);
+      if (member?.socketId && memberId !== socket.userId) {
+        io.to(member.socketId).emit('group_user_typing', {
+          groupId,
+          userId: socket.userId,
+          userName: sender?.name,
+          isTyping
+        });
+      }
+    });
   });
 
   socket.on('disconnect', () => {

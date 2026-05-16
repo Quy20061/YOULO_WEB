@@ -84,6 +84,27 @@ export const SocketProvider = ({ children }) => {
       handlers.forEach(h => h(data));
     });
 
+
+    socket.on('new_group_message', (msg) => {
+      const handlers = listenersRef.current['new_group_message'] || [];
+      handlers.forEach(h => h(msg));
+    });
+
+    socket.on('group_message_sent', (msg) => {
+      const handlers = listenersRef.current['group_message_sent'] || [];
+      handlers.forEach(h => h(msg));
+    });
+
+    socket.on('group_added', (group) => {
+      const handlers = listenersRef.current['group_added'] || [];
+      handlers.forEach(h => h(group));
+    });
+
+    socket.on('group_user_typing', (data) => {
+      const handlers = listenersRef.current['group_user_typing'] || [];
+      handlers.forEach(h => h(data));
+    });
+
     socket.on('friend_request', (data) => {
       const handlers = listenersRef.current['friend_request'] || [];
       handlers.forEach(h => h(data));

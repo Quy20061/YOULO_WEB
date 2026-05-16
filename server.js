@@ -23,6 +23,9 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Serve React frontend (production build)
+app.use(express.static(path.join(__dirname, 'frontend', 'build')));
+
 if (!fs.existsSync('./uploads')) fs.mkdirSync('./uploads');
 if (!fs.existsSync('./uploads/avatars')) fs.mkdirSync('./uploads/avatars');
 if (!fs.existsSync('./uploads/media')) fs.mkdirSync('./uploads/media');
@@ -35,8 +38,7 @@ const db = {
   messages: [],
   posts: [],
   friendships: [],
-  notifications: [],
-  groups: []
+  notifications: []
 };
 
 // Seed demo users
@@ -172,9 +174,10 @@ app.post('/api/friends/request', authMiddleware, (req, res) => {
   res.json({ message: 'Đã gửi yêu cầu kết bạn' });
 });
 
-// Lấy danh sách lời mời kết bạn đang chờ (người khác gửi đến mình)
+// ── FIX 1: Lấy danh sách lời mời kết bạn đang chờ ────────────────
 app.get('/api/friends/pending', authMiddleware, (req, res) => {
   const myId = req.user.id;
+  // Những friendship mà người khác gửi cho mình (userId2 = mình) và status = pending
   const pending = db.friendships.filter(f => f.userId2 === myId && f.status === 'pending');
   const requesters = pending.map(f => safeUser(db.users.find(u => u.id === f.userId1))).filter(Boolean);
   res.json(requesters);
@@ -276,92 +279,6 @@ app.post('/api/posts/:id/comment', authMiddleware, (req, res) => {
   res.json(enriched);
 });
 
-
-// === GROUP ROUTES ===
-function enrichGroup(group) {
-  return {
-    id: group.id,
-    name: group.name,
-    adminId: group.adminId,
-    createdAt: group.createdAt,
-    members: group.members.map(id => {
-      const u = db.users.find(u => u.id === id);
-      return u ? safeUser(u) : null;
-    }).filter(Boolean),
-    lastMessage: group.messages.length > 0 ? group.messages[group.messages.length - 1] : null,
-  };
-}
-
-app.get('/api/groups', authMiddleware, (req, res) => {
-  const myId = req.user.id;
-  const myGroups = db.groups.filter(g => g.members.includes(myId));
-  res.json(myGroups.map(g => enrichGroup(g)));
-});
-
-app.post('/api/groups', authMiddleware, (req, res) => {
-  const { name, memberIds } = req.body;
-  if (!name || !memberIds || memberIds.length === 0) {
-    return res.status(400).json({ error: 'Thiếu tên nhóm hoặc thành viên' });
-  }
-  const allMembers = [req.user.id, ...memberIds.filter(id => id !== req.user.id)];
-  const group = {
-    id: uuidv4(), name,
-    adminId: req.user.id,
-    members: allMembers,
-    messages: [],
-    createdAt: new Date().toISOString(),
-  };
-  db.groups.push(group);
-  const enriched = enrichGroup(group);
-  allMembers.forEach(memberId => {
-    const u = db.users.find(u => u.id === memberId);
-    if (u?.socketId && memberId !== req.user.id) {
-      io.to(u.socketId).emit('group_updated', enriched);
-    }
-  });
-  res.json(enriched);
-});
-
-app.get('/api/groups/:id/messages', authMiddleware, (req, res) => {
-  const group = db.groups.find(g => g.id === req.params.id);
-  if (!group) return res.status(404).json({ error: 'Nhóm không tồn tại' });
-  if (!group.members.includes(req.user.id)) return res.status(403).json({ error: 'Bạn không trong nhóm' });
-  res.json(group.messages);
-});
-
-app.post('/api/groups/:id/members', authMiddleware, (req, res) => {
-  const group = db.groups.find(g => g.id === req.params.id);
-  if (!group) return res.status(404).json({ error: 'Nhóm không tồn tại' });
-  if (group.adminId !== req.user.id) return res.status(403).json({ error: 'Chỉ admin mới được thêm thành viên' });
-  const { memberIds } = req.body;
-  memberIds.forEach(id => { if (!group.members.includes(id)) group.members.push(id); });
-  const enriched = enrichGroup(group);
-  group.members.forEach(memberId => {
-    const u = db.users.find(u => u.id === memberId);
-    if (u?.socketId) io.to(u.socketId).emit('group_updated', enriched);
-  });
-  res.json(enriched);
-});
-
-app.delete('/api/groups/:id/members/me', authMiddleware, (req, res) => {
-  const group = db.groups.find(g => g.id === req.params.id);
-  if (!group) return res.status(404).json({ error: 'Nhóm không tồn tại' });
-  group.members = group.members.filter(id => id !== req.user.id);
-  if (group.adminId === req.user.id && group.members.length > 0) {
-    group.adminId = group.members[0];
-  }
-  if (group.members.length === 0) {
-    db.groups = db.groups.filter(g => g.id !== group.id);
-  } else {
-    const enriched = enrichGroup(group);
-    group.members.forEach(memberId => {
-      const u = db.users.find(u => u.id === memberId);
-      if (u?.socketId) io.to(u.socketId).emit('group_updated', enriched);
-    });
-  }
-  res.json({ message: 'Đã rời nhóm' });
-});
-
 // === SOCKET.IO ===
 const userSockets = new Map(); // userId -> socketId
 
@@ -457,27 +374,6 @@ io.on('connection', (socket) => {
     }
   });
 
-
-  // Group messaging
-  socket.on('send_group_message', ({ groupId, text }) => {
-    const group = db.groups.find(g => g.id === groupId);
-    if (!group || !group.members.includes(socket.userId)) return;
-    const msg = {
-      id: uuidv4(),
-      groupId,
-      senderId: socket.userId,
-      text,
-      createdAt: new Date().toISOString(),
-    };
-    group.messages.push(msg);
-    group.members.forEach(memberId => {
-      const u = db.users.find(u => u.id === memberId);
-      if (u?.socketId) {
-        io.to(u.socketId).emit('new_group_message', msg);
-      }
-    });
-  });
-
   socket.on('disconnect', () => {
     const user = db.users.find(u => u.socketId === socket.id);
     if (user) {
@@ -490,13 +386,10 @@ io.on('connection', (socket) => {
   });
 });
 
-// === SERVE FRONTEND (production) ===
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'frontend/build')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'frontend/build', 'index.html'));
-  });
-}
+// Catch-all: trả về React app cho mọi route không phải /api
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'frontend', 'build', 'index.html'));
+});
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));

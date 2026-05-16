@@ -13,8 +13,8 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     if (!token) return;
-    const socketUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-    const socket = io(socketUrl, { transports: ['websocket'] });
+    const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || window.location.origin;
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -86,17 +86,6 @@ export const SocketProvider = ({ children }) => {
 
     socket.on('friend_request', (data) => {
       const handlers = listenersRef.current['friend_request'] || [];
-      handlers.forEach(h => h(data));
-    });
-
-
-    socket.on('new_group_message', (msg) => {
-      const handlers = listenersRef.current['new_group_message'] || [];
-      handlers.forEach(h => h(msg));
-    });
-
-    socket.on('group_updated', (data) => {
-      const handlers = listenersRef.current['group_updated'] || [];
       handlers.forEach(h => h(data));
     });
 

@@ -7,6 +7,7 @@ const API = process.env.REACT_APP_API_URL || '';
 export default function FriendsPage() {
   const { onlineUsers, on } = useSocket();
   const [friends, setFriends] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [tab, setTab] = useState('friends');
@@ -14,9 +15,12 @@ export default function FriendsPage() {
 
   useEffect(() => {
     loadFriends();
+    loadPendingRequests();
     const unsub = on('friend_request', ({ from }) => {
       setMessage(`🔔 ${from.name} đã gửi lời mời kết bạn!`);
       setTimeout(() => setMessage(''), 4000);
+      // Reload pending requests to show the new one
+      loadPendingRequests();
     });
     return () => unsub();
   }, []);
@@ -32,11 +36,35 @@ export default function FriendsPage() {
     setFriends(res.data);
   };
 
+  // ── FIX 1: Load danh sách lời mời kết bạn đang chờ ──────────────
+  const loadPendingRequests = async () => {
+    try {
+      const res = await axios.get('/api/friends/pending');
+      setPendingRequests(res.data);
+    } catch (e) {
+      console.error('Lỗi load pending requests:', e);
+    }
+  };
+
   const sendFriendRequest = async (targetId) => {
     try {
       await axios.post('/api/friends/request', { targetId });
       setMessage('✅ Đã gửi lời mời kết bạn!');
       setTimeout(() => setMessage(''), 3000);
+    } catch (e) {
+      setMessage('⚠️ ' + (e.response?.data?.error || 'Lỗi'));
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
+  // ── FIX 1: Chấp nhận lời mời kết bạn ────────────────────────────
+  const acceptFriendRequest = async (requesterId) => {
+    try {
+      await axios.post('/api/friends/accept', { requesterId });
+      setMessage('✅ Đã chấp nhận lời mời kết bạn!');
+      setTimeout(() => setMessage(''), 3000);
+      loadFriends();
+      loadPendingRequests();
     } catch (e) {
       setMessage('⚠️ ' + (e.response?.data?.error || 'Lỗi'));
       setTimeout(() => setMessage(''), 3000);
@@ -61,20 +89,53 @@ export default function FriendsPage() {
     </div>
   );
 
+  const tabs = [
+    { id: 'friends', label: `Bạn bè (${friends.length})` },
+    { id: 'pending', label: `🔔 Lời mời${pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}` },
+    { id: 'find', label: '🔍 Tìm bạn mới' },
+  ];
+
   return (
     <div style={styles.container}>
       {message && <div style={styles.toast}>{message}</div>}
       <div style={styles.header}>
         <h2 style={styles.title}>👥 Bạn bè</h2>
         <div style={styles.tabs}>
-          {['friends', 'find'].map(t => (
-            <button key={t} style={{ ...styles.tab, ...(tab === t ? styles.tabActive : {}) }} onClick={() => setTab(t)}>
-              {t === 'friends' ? `Bạn bè (${friends.length})` : '🔍 Tìm bạn mới'}
+          {tabs.map(t => (
+            <button key={t.id} style={{ ...styles.tab, ...(tab === t.id ? styles.tabActive : {}) }} onClick={() => setTab(t.id)}>
+              {t.label}
             </button>
           ))}
         </div>
       </div>
 
+      {/* ── Tab: Lời mời kết bạn ──────────────────── */}
+      {tab === 'pending' && (
+        <div style={styles.searchArea}>
+          {pendingRequests.length === 0 ? (
+            <div style={styles.empty}>
+              <div style={{ fontSize: 48, opacity: 0.3 }}>🔔</div>
+              <p>Không có lời mời kết bạn nào</p>
+            </div>
+          ) : (
+            pendingRequests.map(u => (
+              <div key={u.id} style={styles.userCard}>
+                <AvatarComp u={u} />
+                <div style={styles.userInfo}>
+                  <div style={styles.userName}>{u.name}</div>
+                  <div style={styles.userSub}>@{u.username}</div>
+                  {u.bio && <div style={styles.userBio}>{u.bio}</div>}
+                </div>
+                <button style={styles.acceptBtn} onClick={() => acceptFriendRequest(u.id)}>
+                  ✅ Chấp nhận
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* ── Tab: Tìm bạn mới ──────────────────────── */}
       {tab === 'find' && (
         <div style={styles.searchArea}>
           <input
@@ -99,6 +160,7 @@ export default function FriendsPage() {
         </div>
       )}
 
+      {/* ── Tab: Danh sách bạn bè ─────────────────── */}
       {tab === 'friends' && (
         <div style={styles.grid}>
           {friends.map(f => (
@@ -132,7 +194,7 @@ const styles = {
   },
   header: { marginBottom: 24 },
   title: { margin: '0 0 16px', fontSize: 22, fontWeight: 800, color: '#111827' },
-  tabs: { display: 'flex', gap: 8 },
+  tabs: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   tab: {
     padding: '8px 20px', border: '1.5px solid #e5e7eb',
     borderRadius: 20, cursor: 'pointer', background: 'white',
@@ -155,6 +217,11 @@ const styles = {
   userBio: { color: '#6b7280', fontSize: 13, marginTop: 2 },
   addBtn: {
     background: 'linear-gradient(135deg, #667eea, #764ba2)',
+    color: 'white', border: 'none', borderRadius: 10,
+    padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: 13
+  },
+  acceptBtn: {
+    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
     color: 'white', border: 'none', borderRadius: 10,
     padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: 13
   },

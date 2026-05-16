@@ -8,6 +8,17 @@ const ICE_SERVERS = {
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
+    // ── FIX 3: Thêm TURN server public để vượt NAT đối xứng ──────
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ]
 };
 
@@ -48,7 +59,7 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   };
 
-  // ─── Core: build PeerConnection with full bidirectional audio/video ────────
+  // ─── Build RTCPeerConnection + lấy media ─────────────────────────
   const buildPeer = useCallback(async () => {
     const constraints = {
       audio: {
@@ -75,7 +86,6 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
 
     localStreamRef.current = stream;
 
-    // Show local video preview (mirrored)
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = stream;
     }
@@ -83,18 +93,18 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     const pc = new RTCPeerConnection(ICE_SERVERS);
     peerRef.current = pc;
 
-    // Add ALL local tracks so remote can receive them
     stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-    // Receive remote tracks — attach to <video> or <audio> element
+    // ── FIX 3: Đảm bảo audio remote luôn được gán và autoplay ──────
     pc.ontrack = (event) => {
       const remoteStream = event.streams[0];
       if (callType === 'video' && remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStream;
       }
-      // Always attach audio (works for both audio-only and video calls)
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = remoteStream;
+        // Ép play audio để tránh browser block autoplay
+        remoteAudioRef.current.play().catch(() => {});
       }
     };
 
@@ -153,24 +163,9 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
         setCallStatus('connected');
         startDurationTimer();
       });
-
-    } else {
-      // ── RECEIVER side ─────────────────────────────────────────────
-      (async () => {
-        const pc = await buildPeer();
-        if (!pc) return;
-
-        await pc.setRemoteDescription(new RTCSessionDescription(callerSignal));
-        await flushPendingCandidates(pc);
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        emit('answer_call', { targetId: targetUser.id, signal: answer });
-        setCallStatus('connected');
-        startDurationTimer();
-      })();
     }
+    // ── RECEIVER side: KHÔNG tự động answer, chờ user bấm Nghe ────
+    // (xử lý trong handleAcceptCall bên dưới)
 
     unsubRejected = on('call_rejected', () => {
       setCallStatus('rejected');
@@ -182,11 +177,9 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
       setTimeout(() => { stopStream(); onEnd(); }, 1500);
     });
 
-    // ICE candidates: queue if remoteDescription not set yet
     unsubIce = on('ice_candidate', async ({ candidate }) => {
       const pc = peerRef.current;
-      if (!pc) { pendingCandidatesRef.current.push(candidate); return; }
-      if (!pc.remoteDescription) {
+      if (!pc || !pc.remoteDescription) {
         pendingCandidatesRef.current.push(candidate);
       } else {
         try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
@@ -202,9 +195,24 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     };
   }, []); // eslint-disable-line
 
+  // ── FIX 2: Xử lý nhận cuộc gọi đúng — chỉ chạy khi user bấm Nghe máy ──
   const handleAcceptCall = async () => {
-    // Already handled in useEffect above for isIncoming
     setCallStatus('connecting');
+    const pc = await buildPeer();
+    if (!pc) {
+      setCallStatus('ended');
+      return;
+    }
+
+    await pc.setRemoteDescription(new RTCSessionDescription(callerSignal));
+    await flushPendingCandidates(pc);
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    emit('answer_call', { targetId: targetUser.id, signal: answer });
+    setCallStatus('connected');
+    startDurationTimer();
   };
 
   const handleRejectCall = () => {
@@ -223,7 +231,8 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     if (track) { track.enabled = !track.enabled; setIsVideoOff(!isVideoOff); }
   };
 
-  const baseUrl = process.env.REACT_APP_API_URL || ""; const avatar = targetUser.avatar ? `${baseUrl}${targetUser.avatar}` : null;
+  const baseUrl = process.env.REACT_APP_API_URL || '';
+  const avatar = targetUser.avatar ? `${baseUrl}${targetUser.avatar}` : null;
 
   const statusLabel = {
     calling: '📡 Đang gọi...',
@@ -236,16 +245,15 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
 
   return (
     <div style={styles.overlay}>
-      {/* Hidden audio element — always captures remote audio regardless of call type */}
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+      {/* ── FIX 3: Audio element luôn hiện để browser cho phép play ── */}
+      <audio ref={remoteAudioRef} autoPlay playsInline controls={false}
+        style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
 
       <div style={styles.container}>
-        {/* Remote video (video calls) */}
         {callType === 'video' && (
           <video ref={remoteVideoRef} autoPlay playsInline style={styles.remoteVideo} />
         )}
 
-        {/* Background / avatar panel */}
         <div style={{ ...styles.bgPanel, opacity: callType === 'video' && callStatus === 'connected' ? 0 : 1 }}>
           <div style={styles.avatarRing}>
             <div style={styles.avatarLarge}>
@@ -266,7 +274,6 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
           )}
         </div>
 
-        {/* Local video preview */}
         {callType === 'video' && (
           <video
             ref={localVideoRef}
@@ -275,7 +282,6 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
           />
         )}
 
-        {/* Top bar (connected video) */}
         {callType === 'video' && callStatus === 'connected' && (
           <div style={styles.videoTopBar}>
             <span style={styles.videoName}>{targetUser.name}</span>
@@ -283,7 +289,6 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
           </div>
         )}
 
-        {/* Controls */}
         <div style={styles.controls}>
           {callStatus === 'incoming' ? (
             <>

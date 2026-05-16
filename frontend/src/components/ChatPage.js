@@ -33,13 +33,25 @@ export default function ChatPage() {
 
   useEffect(() => {
     const u1 = on('new_message', (msg) => {
-      if (selectedUser && (msg.senderId === selectedUser.id || msg.receiverId === selectedUser.id)) {
-        setMessages(prev => [...prev, msg]);
+      if (selectedUser) {
+        const isRelevant =
+          (msg.senderId === selectedUser.id && msg.receiverId === user.id) ||
+          (msg.senderId === user.id && msg.receiverId === selectedUser.id);
+        if (isRelevant) {
+          setMessages(prev => {
+            // Tránh duplicate nếu message_sent đã thêm trước đó
+            if (prev.some(m => m.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
+        }
       }
       loadConversations();
     });
     const u2 = on('message_sent', (msg) => {
-      setMessages(prev => [...prev, msg]);
+      setMessages(prev => {
+        if (prev.some(m => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
       loadConversations();
     });
     const u3 = on('user_typing', ({ userId, isTyping }) => {
@@ -60,7 +72,10 @@ export default function ChatPage() {
   }, [messages]);
 
   useEffect(() => {
-    if (selectedUser) loadMessages(selectedUser.id);
+    if (selectedUser) {
+      setMessages([]); // Xóa tin nhắn cũ khi chuyển cuộc trò chuyện
+      loadMessages(selectedUser.id);
+    }
   }, [selectedUser]);
 
   useEffect(() => {

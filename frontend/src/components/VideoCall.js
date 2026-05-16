@@ -48,7 +48,7 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   };
 
-  // ─── Core: build PeerConnection with full bidirectional audio/video ────────
+  // ─── Core: build PeerConnection ────────────────────────────────────────────
   const buildPeer = useCallback(async () => {
     const constraints = {
       audio: {
@@ -75,7 +75,6 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
 
     localStreamRef.current = stream;
 
-    // Show local video preview (mirrored)
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = stream;
     }
@@ -83,17 +82,14 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     const pc = new RTCPeerConnection(ICE_SERVERS);
     peerRef.current = pc;
 
-    // Add ALL local tracks so remote can receive them
     stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-    // Receive remote tracks — attach to <video> or <audio> element
     pc.ontrack = (event) => {
       const remoteStream = event.streams[0];
       if (callType === 'video' && remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStream;
         remoteVideoRef.current.play().catch(() => {});
       }
-      // Always attach audio — dùng setTimeout để chờ ref mount xong
       const attachAudio = () => {
         if (remoteAudioRef.current) {
           remoteAudioRef.current.srcObject = remoteStream;
@@ -131,79 +127,62 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     pendingCandidatesRef.current = [];
   };
 
+  // ─── Caller side: khởi động ngay khi mount ─────────────────────────────────
   useEffect(() => {
-    let unsubAnswered, unsubRejected, unsubEnded, unsubIce;
+    if (isIncoming) return; // Bên nhận xử lý riêng trong handleAcceptCall
 
-    if (!isIncoming) {
-      // ── CALLER side ──────────────────────────────────────────────
-      (async () => {
-        const pc = await buildPeer();
-        if (!pc) return;
+    let unsubAnswered;
+    (async () => {
+      const pc = await buildPeer();
+      if (!pc) return;
 
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-        emit('call_user', {
-          targetId: targetUser.id,
-          signal: offer,
-          callType,
-          callerName: user.name,
-          callerAvatar: user.avatar,
-        });
-      })();
-
-      unsubAnswered = on('call_answered', async ({ signal }) => {
-        const pc = peerRef.current;
-        if (!pc) return;
-        await pc.setRemoteDescription(new RTCSessionDescription(signal));
-        await flushPendingCandidates(pc);
-        // ontrack có thể đã fire trước khi setRemoteDescription — gán lại stream nếu có
-        const receivers = pc.getReceivers();
-        if (receivers.length > 0) {
-          const remoteStream = new MediaStream(receivers.map(r => r.track).filter(Boolean));
-          if (callType === 'video' && remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteStream;
-            remoteVideoRef.current.play().catch(() => {});
-          }
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = remoteStream;
-            remoteAudioRef.current.play().catch(() => {});
-          }
-        }
-        setCallStatus('connected');
-        startDurationTimer();
+      emit('call_user', {
+        targetId: targetUser.id,
+        signal: offer,
+        callType,
+        callerName: user.name,
+        callerAvatar: user.avatar,
       });
+    })();
 
-    } else {
-      // ── RECEIVER side ─────────────────────────────────────────────
-      (async () => {
-        const pc = await buildPeer();
-        if (!pc) return;
+    unsubAnswered = on('call_answered', async ({ signal }) => {
+      const pc = peerRef.current;
+      if (!pc) return;
+      await pc.setRemoteDescription(new RTCSessionDescription(signal));
+      await flushPendingCandidates(pc);
+      const receivers = pc.getReceivers();
+      if (receivers.length > 0) {
+        const remoteStream = new MediaStream(receivers.map(r => r.track).filter(Boolean));
+        if (callType === 'video' && remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+          remoteVideoRef.current.play().catch(() => {});
+        }
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = remoteStream;
+          remoteAudioRef.current.play().catch(() => {});
+        }
+      }
+      setCallStatus('connected');
+      startDurationTimer();
+    });
 
-        await pc.setRemoteDescription(new RTCSessionDescription(callerSignal));
-        await flushPendingCandidates(pc);
+    return () => { unsubAnswered?.(); };
+  }, []); // eslint-disable-line
 
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        emit('answer_call', { targetId: targetUser.id, signal: answer });
-        setCallStatus('connected');
-        startDurationTimer();
-      })();
-    }
-
-    unsubRejected = on('call_rejected', () => {
+  // ─── Sự kiện chung (reject, end, ice) ──────────────────────────────────────
+  useEffect(() => {
+    const unsubRejected = on('call_rejected', () => {
       setCallStatus('rejected');
       setTimeout(() => { stopStream(); onEnd(); }, 2000);
     });
-
-    unsubEnded = on('call_ended', () => {
+    const unsubEnded = on('call_ended', () => {
       setCallStatus('ended');
       setTimeout(() => { stopStream(); onEnd(); }, 1500);
     });
-
-    // ICE candidates: queue if remoteDescription not set yet
-    unsubIce = on('ice_candidate', async ({ candidate }) => {
+    const unsubIce = on('ice_candidate', async ({ candidate }) => {
       const pc = peerRef.current;
       if (!pc) { pendingCandidatesRef.current.push(candidate); return; }
       if (!pc.remoteDescription) {
@@ -214,17 +193,28 @@ export default function VideoCall({ targetUser, callType, isIncoming, callerSign
     });
 
     return () => {
-      unsubAnswered?.();
-      unsubRejected?.();
-      unsubEnded?.();
-      unsubIce?.();
+      unsubRejected();
+      unsubEnded();
+      unsubIce();
       stopStream();
     };
   }, []); // eslint-disable-line
 
+  // ─── Bên nhận: bấm "Nghe máy" mới khởi động WebRTC ───────────────────────
   const handleAcceptCall = async () => {
-    // Already handled in useEffect above for isIncoming
     setCallStatus('connecting');
+    const pc = await buildPeer();
+    if (!pc) return;
+
+    await pc.setRemoteDescription(new RTCSessionDescription(callerSignal));
+    await flushPendingCandidates(pc);
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    emit('answer_call', { targetId: targetUser.id, signal: answer });
+    setCallStatus('connected');
+    startDurationTimer();
   };
 
   const handleRejectCall = () => {

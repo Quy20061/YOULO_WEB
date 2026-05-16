@@ -25,7 +25,12 @@ export default function FeedPage() {
       setPosts(prev => prev.map(p => p.id === postId ? { ...p, likeCount: likes, liked: userId === user.id ? !p.liked : p.liked } : p));
     });
     const u3 = on('new_comment', ({ postId, comment }) => {
-      setPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...p.comments, comment] } : p));
+      setPosts(prev => prev.map(p => {
+        if (p.id !== postId) return p;
+        // Tránh duplicate nếu đã thêm qua handleComment
+        if (p.comments?.some(c => c.id === comment.id)) return p;
+        return { ...p, comments: [...(p.comments || []), comment] };
+      }));
     });
     return () => { u1(); u2(); u3(); };
   }, []);
@@ -57,7 +62,18 @@ export default function FeedPage() {
   const handleComment = async (postId) => {
     const text = commentInputs[postId];
     if (!text?.trim()) return;
-    await axios.post(`/api/posts/${postId}/comment`, { text });
+    try {
+      const res = await axios.post(`/api/posts/${postId}/comment`, { text });
+      const newComment = res.data;
+      // Thêm bình luận trực tiếp vào state (không chờ socket)
+      setPosts(prev => prev.map(p =>
+        p.id === postId
+          ? { ...p, comments: [...(p.comments || []), newComment] }
+          : p
+      ));
+    } catch (e) {
+      console.error('Lỗi gửi bình luận:', e);
+    }
     setCommentInputs(prev => ({ ...prev, [postId]: '' }));
   };
 

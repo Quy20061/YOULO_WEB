@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,6 +9,9 @@ import { formatDistanceToNow } from 'date-fns';
 import { vi } from 'date-fns/locale';
 
 const API = process.env.REACT_APP_API_URL || '';
+
+// Common emoji list
+const EMOJI_LIST = ['😀','😂','🥰','😍','🤩','😎','🥺','😭','😤','🤔','👍','👎','❤️','🔥','✨','🎉','🙏','💪','🤝','👏','😅','🤣','😊','🥳','😴','🤯','😱','🤗','💀','👀','💯','🎵','🌟','💎','🚀','🌈','🍕','🎮','📸','💡'];
 
 export default function ChatPage() {
   const { user } = useAuth();
@@ -26,8 +29,13 @@ export default function ChatPage() {
   const [showCallModal, setShowCallModal] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [tab, setTab] = useState('direct'); // 'direct' | 'groups'
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [imagePreview, setImagePreview] = useState(null); // { file, url }
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [lightboxImg, setLightboxImg] = useState(null);
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => { loadConversations(); loadGroups(); }, []);
 
@@ -108,6 +116,43 @@ export default function ChatPage() {
     emit('send_message', { receiverId: selectedUser.id, text: input.trim(), type: 'text' });
     setInput('');
     emit('typing', { receiverId: selectedUser.id, isTyping: false });
+  };
+
+  const sendImageMessage = async (file) => {
+    if (!file || !selectedUser) return;
+    setUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await axios.post('/api/upload/image', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      const imageUrl = res.data.url;
+      emit('send_message', { receiverId: selectedUser.id, text: imageUrl, type: 'image' });
+    } catch (err) {
+      // Fallback: send as base64 if server upload fails
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        emit('send_message', { receiverId: selectedUser.id, text: e.target.result, type: 'image' });
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setUploadingImage(false);
+      setImagePreview(null);
+    }
+  };
+
+  const handleImageSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const url = URL.createObjectURL(file);
+    setImagePreview({ file, url });
+    e.target.value = '';
+  };
+
+  const handleEmojiClick = (emoji) => {
+    setInput(prev => prev + emoji);
+    setShowEmojiPicker(false);
   };
 
   const handleInputChange = (e) => {
@@ -262,11 +307,21 @@ export default function ChatPage() {
                 <div key={msg.id} style={{ ...styles.msgRow, justifyContent: msg.senderId === user.id ? 'flex-end' : 'flex-start' }}>
                   {msg.senderId !== user.id && <Avatar u={selectedUser} size={30} />}
                   <div style={{ maxWidth: '68%' }}>
-                    <div style={{ ...styles.bubble, ...(msg.senderId === user.id ? styles.bubbleMine : styles.bubbleTheirs) }}>
-                      {msg.text}
+                    <div style={{ ...styles.bubble, ...(msg.senderId === user.id ? styles.bubbleMine : styles.bubbleTheirs), padding: msg.type === 'image' ? '4px' : undefined }}>
+                      {msg.type === 'image' ? (
+                        <img
+                          src={msg.text && msg.text.startsWith('/') ? `${API}${msg.text}` : msg.text}
+                          alt="Ảnh"
+                          style={{ maxWidth: 220, maxHeight: 260, borderRadius: 12, display: 'block', cursor: 'pointer', objectFit: 'cover' }}
+                          onClick={() => setLightboxImg(msg.text && msg.text.startsWith('/') ? `${API}${msg.text}` : msg.text)}
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                      ) : (
+                        msg.text || ''
+                      )}
                     </div>
                     <div style={{ ...styles.msgTime, textAlign: msg.senderId === user.id ? 'right' : 'left' }}>
-                      {formatDistanceToNow(new Date(msg.createdAt), { locale: vi, addSuffix: true })}
+                      {msg.createdAt ? formatDistanceToNow(new Date(msg.createdAt), { locale: vi, addSuffix: true }) : ''}
                       {msg.senderId === user.id && (msg.read ? ' ✓✓' : ' ✓')}
                     </div>
                   </div>
@@ -283,18 +338,55 @@ export default function ChatPage() {
               <div ref={messagesEndRef} />
             </div>
 
+            {/* Image preview bar */}
+            {imagePreview && (
+              <div style={styles.imagePreviewBar}>
+                <img src={imagePreview.url} alt="preview" style={{ height: 70, borderRadius: 10, objectFit: 'cover' }} />
+                <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, flex: 1, paddingLeft: 10 }}>Gửi ảnh này?</span>
+                <button style={styles.previewSendBtn} onClick={() => sendImageMessage(imagePreview.file)} disabled={uploadingImage}>
+                  {uploadingImage ? '⏳' : '➤ Gửi'}
+                </button>
+                <button style={styles.previewCancelBtn} onClick={() => setImagePreview(null)}>✕</button>
+              </div>
+            )}
+
+            {/* Emoji picker */}
+            {showEmojiPicker && (
+              <div style={styles.emojiPicker}>
+                {EMOJI_LIST.map(e => (
+                  <button key={e} style={styles.emojiBtn} onClick={() => handleEmojiClick(e)}>{e}</button>
+                ))}
+              </div>
+            )}
+
+            {/* Input area with toolbar */}
             <div style={styles.inputArea}>
+              <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageSelect} />
+              <div style={styles.toolbarIcons}>
+                <button style={styles.toolBtn} title="Gửi ảnh" onClick={() => fileInputRef.current && fileInputRef.current.click()}>🖼️</button>
+                <button style={styles.toolBtn} title="Sticker">🎭</button>
+                <button style={{ ...styles.toolBtn, fontSize: 11, fontWeight: 800, letterSpacing: 1, color: '#a78bfa' }} title="GIF">GIF</button>
+              </div>
               <input
                 style={styles.messageInput}
-                placeholder="Nhắn gì đó... 💬"
+                placeholder="Aa"
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
               />
-              <button style={styles.sendBtn} onClick={sendMessage}>
+              <button style={styles.emojiToggleBtn} title="Emoji" onClick={() => setShowEmojiPicker(p => !p)}>😊</button>
+              <button style={{ ...styles.sendBtn, opacity: !input.trim() ? 0.5 : 1 }} onClick={sendMessage}>
                 <span style={{ fontSize: 20 }}>➤</span>
               </button>
             </div>
+
+            {/* Image lightbox */}
+            {lightboxImg && (
+              <div style={styles.lightbox} onClick={() => setLightboxImg(null)}>
+                <img src={lightboxImg} alt="full" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.7)' }} onClick={e => e.stopPropagation()} />
+                <button style={styles.lightboxClose} onClick={() => setLightboxImg(null)}>✕</button>
+              </div>
+            )}
           </>
         ) : (
           <div style={styles.emptyState}>
@@ -522,6 +614,16 @@ const styles = {
   emptyTitle: { fontSize: 22, fontWeight: 800, color: 'white', margin: 0, letterSpacing: '-0.5px' },
   emptyText: { color: 'rgba(255,255,255,0.35)', fontSize: 14, textAlign: 'center', maxWidth: 280, lineHeight: 1.6 },
   createGroupBtnEmpty: { padding: '12px 28px', borderRadius: 14, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg, #6366f1, #a855f7)', color: 'white', fontWeight: 700, fontSize: 15, boxShadow: '0 4px 16px rgba(99,102,241,0.35)' },
+  toolbarIcons: { display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 },
+  toolBtn: { width: 36, height: 36, borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' },
+  emojiToggleBtn: { width: 36, height: 36, borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  emojiPicker: { display: 'flex', flexWrap: 'wrap', gap: 2, padding: '10px 16px', background: '#1a1a2e', borderTop: '1px solid rgba(255,255,255,0.08)', maxHeight: 140, overflowY: 'auto' },
+  emojiBtn: { width: 36, height: 36, borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  imagePreviewBar: { display: 'flex', alignItems: 'center', padding: '10px 16px', background: '#1a1a2e', borderTop: '1px solid rgba(255,255,255,0.08)', gap: 8 },
+  previewSendBtn: { padding: '8px 16px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #a855f7, #ec4899)', color: 'white', cursor: 'pointer', fontWeight: 700, fontSize: 13 },
+  previewCancelBtn: { width: 32, height: 32, borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: 16 },
+  lightbox: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 },
+  lightboxClose: { position: 'absolute', top: 20, right: 24, width: 44, height: 44, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.1)', color: 'white', cursor: 'pointer', fontSize: 20 },
   incomingCallNotif: { position: 'fixed', bottom: 28, right: 28, background: '#1a0a2e', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 20, padding: '16px 20px', display: 'flex', gap: 14, alignItems: 'center', zIndex: 1000, boxShadow: '0 20px 60px rgba(0,0,0,0.5)', minWidth: 300 },
   callNotifPulse: { position: 'absolute', inset: 0, borderRadius: 20, border: '2px solid rgba(168,85,247,0.4)', pointerEvents: 'none' },
   callNotifInfo: { display: 'flex', gap: 12, alignItems: 'center', flex: 1 },

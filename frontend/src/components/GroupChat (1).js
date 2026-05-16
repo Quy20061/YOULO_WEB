@@ -142,11 +142,21 @@ export default function GroupChat({ group, onBack, onGroupUpdated }) {
                 <div style={{
                   ...styles.bubble,
                   ...(isMine ? styles.bubbleMine : styles.bubbleTheirs),
+                  padding: msg.type === 'image' ? '4px' : undefined,
                 }}>
-                  {msg.text}
+                  {msg.type === 'image' ? (
+                    <img
+                      src={msg.text && msg.text.startsWith('/') ? `${API}${msg.text}` : msg.text}
+                      alt="Ảnh"
+                      style={{ maxWidth: 220, maxHeight: 260, borderRadius: 12, display: 'block', cursor: 'zoom-in', objectFit: 'cover' }}
+                      onError={(e) => { e.target.alt = '⚠️ Không tải được ảnh'; }}
+                    />
+                  ) : (
+                    msg.text || ''
+                  )}
                 </div>
                 <div style={{ ...styles.msgTime, textAlign: isMine ? 'right' : 'left' }}>
-                  {formatDistanceToNow(new Date(msg.createdAt), { locale: vi, addSuffix: true })}
+                  {msg.createdAt ? formatDistanceToNow(new Date(msg.createdAt), { locale: vi, addSuffix: true }) : ''}
                 </div>
               </div>
             </div>
